@@ -2,11 +2,15 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from typing import List
 import asyncio
-import base64
 import os
 import tempfile
+import re
 from pathlib import Path
+from pydantic import BaseModel
+import json
 
 # Local Subsystem Integration
 from memory import retrieve_memories
@@ -14,6 +18,8 @@ from prompt_builder import build_messages
 from generation import generate_stream, get_available_models, switch_active_model
 from state import state, update_state, set_active_model
 from graph_memory import extract_entities_and_update, get_graph_context
+from media_handler import process_url, extract_frames, TEMP_IMAGE_DIR
+from image_generator import generate_selfie
 
 # UI Terminal Formatting
 from rich.console import Console
@@ -23,13 +29,16 @@ app = FastAPI()
 chat_lock = asyncio.Lock()
 console = Console()
 
-# Create temp directory for images if it doesn't exist
-TEMP_IMAGE_DIR = os.path.join(tempfile.gettempdir(), "persona_ai_images")
-os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
+class FeedbackData(BaseModel):
+    user_input: str
+    rejected_response: str
+    chosen_response: str
+
+app.mount("/images", StaticFiles(directory=TEMP_IMAGE_DIR), name="images")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://freeness-gulf-jeep.ngrok-free.dev"],
+    allow_origins=["*"], # Simplified for local dev
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -39,7 +48,7 @@ history = []
 def log_to_console(user_input, has_image, response, active_target):
     console.print("\n" + " LOCAL ENGINE EXECUTION ".center(60, "="), style="bold magenta")
     console.print(Panel(f"[bold cyan]Active Core:[/bold cyan] {active_target}", border_style="cyan"))
-    console.print(Panel(f"[bold green]User Input:[/bold green] {user_input} {'[Attached Image Payload]' if has_image else ''}", border_style="green"))
+    console.print(Panel(f"[bold green]User Input:[/bold green] {user_input} {'[Attached Media Payload]' if has_image else ''}", border_style="green"))
     console.print(Panel(f"[bold pink1]Rosia Output:[/bold pink1] {response}", border_style="pink1"))
     console.print("=" * 60 + "\n", style="bold magenta")
 
@@ -47,17 +56,31 @@ async def response_generator(messages, user_input, has_image, target_model):
     global history
     full_response = ""
     
+    # Stream normally, let the React frontend handle hiding the tags!
     for chunk in generate_stream(messages, target_model):
         full_response += chunk
         yield chunk
         await asyncio.sleep(0)
 
+    # After text generation finishes, process any selfies generated
+    selfie_match = re.search(r'\[TRIGGER_SELFIE:(.*?)\]', full_response)
+    if selfie_match:
+        description = selfie_match.group(1).strip()
+        console.print(Panel(f"[bold yellow]{description}[/bold yellow]", title="[bold orange3]📸 LLM Image Prompt Extracted[/bold orange3]", border_style="orange3"))
+        # 1. Execute the VRAM Swap Image Generation
+        image_path = await asyncio.to_thread(generate_selfie, description)
+        
+        # 2. Only yield the attachment if the image successfully generated!
+        if image_path:
+            filename = os.path.basename(image_path)
+            yield f"\ndata: [SYSTEM_MEDIA_ATTACHMENT: file://{filename}]\n\n"
+
+    # Clean the history so the raw trigger bracket doesn't confuse future context
     history.append({"role": "user", "content": user_input})
     history.append({"role": "assistant", "content": full_response.strip()})
     history = history[-12:]
+    
     log_to_console(user_input, has_image, full_response.strip(), target_model)
-
-# /vitals endpoint removed (was causing issues when optional hardware monitoring deps are not installed).
 
 @app.get("/status")
 async def get_status():
@@ -69,7 +92,6 @@ async def get_status():
 
     if len(history) > 0:
         from state import state
-        # A simple stateful dynamic computation matching persona
         count = state.get("interaction_count", 0)
         chemistry = min(100, 50 + (count * 4))
         
@@ -87,71 +109,71 @@ async def get_status():
             tone = "warm"
             depth = "steady"
             
-    return JSONResponse(content={
-        "chemistry": chemistry,
-        "mood": mood,
-        "tone": tone,
-        "depth": depth
-    })
+    return JSONResponse(content={"chemistry": chemistry, "mood": mood, "tone": tone, "depth": depth})
 
 @app.get("/models")
 async def list_models():
-    """Exposes accessible local architecture models to interface selection menus."""
     models = await asyncio.to_thread(get_available_models)
     return JSONResponse(content={"models": models, "active": state["active_model"]})
 
 @app.post("/switch_model")
 async def change_model(model_name: str = Form(...)):
-    """Triggers local target weight replacement execution."""
     set_active_model(model_name)
     result = await asyncio.to_thread(switch_active_model, model_name)
-    console.print(f"[bold yellow]Runtime Target Updated to: {model_name}[/bold yellow]")
     return JSONResponse(content=result)
 
 @app.post("/chat")
-async def chat(user_input: str = Form(""), target_model: str = Form("default"), image: UploadFile = File(None)):
+async def chat(user_input: str = Form(""), target_model: str = Form("default"), files: List[UploadFile] = File(None)):
     async with chat_lock:
         if target_model is None or not str(target_model).strip():
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Model not connected properly",
-                    "detail": "You provided an empty model id. Start the engine/server and choose a model from /models."
-                },
-            )
+            return JSONResponse(status_code=400, content={"error": "Model not connected properly"})
 
         formatted_input = []
-        has_img = False
-        image_path = None
+        has_media = False
+        link_summaries = []
 
-        # Native multimodal injection formatting handling for llama.cpp vision models
-        if image:
-            has_img = True
-            img_bytes = await image.read()
-            
-            # Save image to temporary file for llama-server to access
-            ext = Path(image.filename or "image.jpg").suffix or ".jpg"
-            filename = f"temp_{os.urandom(8).hex()}{ext}"
-            image_path = os.path.join(TEMP_IMAGE_DIR, filename)
-            
-            with open(image_path, "wb") as f:
-                f.write(img_bytes)
-            
-            # When --media-path is set, send just the filename (relative to media directory)
-            file_url = f"file://{filename}"
-            
-            formatted_input.append({
-                "type": "image_url",
-                "image_url": {"url": file_url}
-            })
-            
-            console.print(f"[cyan]Image saved to: {image_path}[/cyan]")
-            console.print(f"[cyan]Image URL: {file_url}[/cyan]")
+        if files and files[0].filename != "":
+            has_media = True
+            for file in files:
+                ext = Path(file.filename or "image.jpg").suffix.lower()
+                filename = f"temp_{os.urandom(8).hex()}{ext}"
+                filepath = os.path.join(TEMP_IMAGE_DIR, filename)
+                
+                content = await file.read()
+                with open(filepath, "wb") as f:
+                    f.write(content)
+                
+                if ext in ['.mp4', '.webm', '.gif']:
+                    frames = await asyncio.to_thread(extract_frames, filepath)
+                    for frame_name in frames:
+                        formatted_input.append({"type": "image_url", "image_url": {"url": f"file://{frame_name}"}})
+                else:
+                    formatted_input.append({"type": "image_url", "image_url": {"url": f"file://{filename}"}})
 
-        if user_input and user_input.strip():
-            formatted_input.append({"type": "text", "text": user_input.strip()})
+        url_pattern = r'(https?:\/\/[^\s]+)'
+        urls = re.findall(url_pattern, user_input)
+        
+        for url in urls:
+            result = await process_url(url)
+            if result["type"] == "media":
+                has_media = True
+                if result["ext"] in ['.mp4', '.webm', '.gif']:
+                    frames = await asyncio.to_thread(extract_frames, result["filepath"])
+                    for frame_name in frames:
+                        formatted_input.append({"type": "image_url", "image_url": {"url": f"file://{frame_name}"}})
+                else:
+                    filename = os.path.basename(result["filepath"])
+                    formatted_input.append({"type": "image_url", "image_url": {"url": f"file://{filename}"}})
+            elif result["type"] == "text":
+                link_summaries.append(f"Content from {url}: {result['content']}")
+
+        final_text_input = user_input.strip()
+        if link_summaries:
+            final_text_input += "\n\n[System Note: The user shared links containing the following text:]\n" + "\n".join(link_summaries)
+
+        if final_text_input:
+            formatted_input.append({"type": "text", "text": final_text_input})
             
-        # Ensure database routing logic matches standard textual query abstractions
         flat_search_string = user_input.strip() if user_input else "multimodal context interaction"
         
         await asyncio.to_thread(update_state, flat_search_string)
@@ -160,7 +182,6 @@ async def chat(user_input: str = Form(""), target_model: str = Form("default"), 
         memories = await asyncio.to_thread(retrieve_memories, flat_search_string)
         graph_summary = await asyncio.to_thread(get_graph_context)
         
-        # Build core system contextual staging frames
         base_messages = build_messages(
             user_input=flat_search_string,
             memories=memories,
@@ -169,20 +190,34 @@ async def chat(user_input: str = Form(""), target_model: str = Form("default"), 
             history=history
         )
         
-        # Overwrite user entry block with full vision array syntax payload
-        if has_img:
-            # `content` can be either a string (text-only) or a multimodal array (image+text).
-            # Keep runtime behavior identical; this clarifies intent for static type checkers.
-            base_messages[-1]["content"] = formatted_input  # type: ignore[assignment]
+        if has_media or link_summaries:
+            base_messages[-1]["content"] = formatted_input
 
-        # Execute generation tracking directly against specified execution slot
         active_engine = target_model if target_model != "default" else state["active_model"]
         set_active_model(active_engine)
 
         return StreamingResponse(
-            response_generator(base_messages, flat_search_string, has_img, active_engine), 
+            response_generator(base_messages, flat_search_string, has_media, active_engine), 
             media_type="text/event-stream"
         )
+
+@app.post("/feedback")
+async def save_feedback(data: FeedbackData):
+    """Saves corrections to a local JSONL file for future DPO fine-tuning."""
+    
+    dpo_row = {
+        "prompt": f"User: {data.user_input}\nRosia:",
+        "chosen": data.chosen_response,
+        "rejected": data.rejected_response
+    }
+    
+    file_path = r"C:\Project\persona-ai\preferences.jsonl"
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(dpo_row) + "\n")
+        
+    console.print(f"[bold yellow][DPO LOG][/bold yellow] Saved correction to {file_path}")
+    return {"status": "success", "message": "Feedback saved for training."}
+# ---------------------
 
 if __name__ == "__main__":
     import uvicorn
