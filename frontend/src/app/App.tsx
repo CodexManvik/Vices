@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Send, ImagePlus, ChevronDown, Circle, Sparkle, Mic } from "lucide-react";
 import { Avatar } from "./components/avatar";
@@ -9,7 +10,7 @@ function getApiBaseUrl() {
 
   const envUrl = (import.meta as any)?.env?.VITE_API_BASE_URL as string | undefined;
   if (envUrl && envUrl.trim()) return envUrl.trim().replace(/\/+$/, "");
-  return "https://commissioner-twin-submitted-protest.trycloudflare.com";
+  return "https://argued-billing-continually-parents.trycloudflare.com";
 }
 
 export default function App() {
@@ -33,7 +34,7 @@ export default function App() {
 
   const [showNotice, setShowNotice] = useState(true);
 
-  const [status, setStatus] = useState({ chemistry: 50, mood: "neutral", tone: "casual", depth: "surface" });
+  const [_status, setStatus] = useState({ chemistry: 50, mood: "neutral", tone: "casual", depth: "surface" });
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
@@ -238,7 +239,7 @@ export default function App() {
           initial={{ y: -30, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.6, ease: "easeOut" }}
-          className="flex items-center justify-between px-10 py-5 border-b border-white/[0.04] backdrop-blur-2xl bg-black/40"
+          className="flex items-center justify-between px-4 md:px-10 py-4 md:py-5 border-b border-white/[0.04] backdrop-blur-2xl bg-black/40"
         >
           <div className="flex items-center gap-3">
             <div className="relative">
@@ -293,7 +294,7 @@ export default function App() {
           </div>
         </motion.nav>
 
-        <div className="flex-1 grid grid-cols-[440px_1fr] gap-6 p-6 overflow-hidden">
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-[440px_1fr] gap-4 md:gap-6 p-4 md:p-6 overflow-hidden">
           <motion.aside
             initial={{ x: -40, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
@@ -301,7 +302,7 @@ export default function App() {
             className="relative rounded-3xl overflow-hidden border border-white/[0.06] bg-gradient-to-b from-white/[0.03] to-transparent backdrop-blur-2xl shadow-[0_30px_80px_rgba(0,0,0,0.6)]"
           >
             <div className="absolute inset-0 bg-gradient-to-b from-[#0a040a] via-[#08030a] to-black" />
-            <div className="relative h-full flex flex-col p-6">
+            <div className="relative h-full flex flex-col p-4 md:p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-500">Companion</p>
@@ -355,7 +356,7 @@ export default function App() {
           >
             <div className="absolute inset-0 bg-gradient-to-br from-[#0a040a] via-black to-[#08030a]" />
 
-            <div className="relative px-7 py-5 border-b border-white/[0.05] flex items-center justify-between">
+            <div className="relative px-4 md:px-7 py-4 md:py-5 border-b border-white/[0.05] flex items-center justify-between">
               <div>
                 <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-500">
                   {activeTab === "models" ? "models" : "conversation"}
@@ -421,7 +422,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="relative flex-1 overflow-y-auto px-7 py-6 space-y-5 scrollbar-thin">
+            <div className="relative flex-1 overflow-y-auto px-4 md:px-7 py-4 md:py-6 space-y-5 scrollbar-thin">
               {activeTab === "models" ? (
                 <div className="space-y-3">
                   {models.map((m: string) => (
@@ -458,7 +459,7 @@ export default function App() {
                         transition={{ duration: 0.4, ease: "easeOut" }}
                         className={`flex ${m.from === "you" ? "justify-end" : "justify-start"}`}
                       >
-                        <div className={`max-w-[68%] ${m.from === "you" ? "items-end" : "items-start"} flex flex-col`}>
+                          <div className={`max-w-[90%] md:max-w-[68%] ${m.from === "you" ? "items-end" : "items-start"} flex flex-col`}>
                           <span
                             className={`text-[9px] uppercase tracking-[0.3em] mb-1.5 ${
                               m.from === "you" ? "text-neutral-600" : "text-[#e87a8c]"
@@ -532,19 +533,19 @@ export default function App() {
             </div>
 
             {activeTab === "chat" && (
-              <div className="relative border-t border-white/[0.05] p-5 bg-black/40 backdrop-blur-xl">
-                <div className="flex items-end gap-3">
+              <div className="relative border-t border-white/[0.05] p-3 md:p-5 bg-black/40 backdrop-blur-xl">
+                <div className="flex items-end gap-3 flex-wrap">
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => {
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
                       const file = e.target.files?.[0];
                       if (file) {
                         const reader = new FileReader();
-                        reader.onload = (event) => {
+                        reader.onload = (event: ProgressEvent<FileReader>) => {
                           const imageSrc = event.target?.result as string;
                           setSelectedImage(imageSrc);
-                          e.target.value = "";
+                          if (e.target) e.target.value = "";
                         };
                         reader.readAsDataURL(file);
                       }
@@ -582,13 +583,13 @@ export default function App() {
                   <div className="flex-1 relative">
                     <textarea
                       value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          send();
-                        }
-                      }}
+                      onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setMessage(e.target.value)}
+                        onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            send();
+                          }
+                        }}
                       placeholder="say something to her..."
                       rows={1}
                       disabled={inputDisabled}
