@@ -19,13 +19,14 @@ os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
 # OPTIMIZED FOR TOKENS: Shrunk from 45 tokens to ~20 highly-weighted tags
 # Hardcode her exact physical identity here so the LLM doesn't have to remember it
 BASE_PROMPT = (
-    "brown and blonde hair, slim sexy waist, above average breasts, big ass, latina skin tone, "
-    "RAW photo, masterpiece, best quality, 1girl, 18yo, realistic skin texture"
+    "brown and blonde hair, slim sexy waist, big breasts, big ass, latina skin tone, "
+    "RAW photo, analog style, 8k uhd, dslr, soft volumetric lighting, highly detailed, "
+    "(masterpiece, best quality:1.2), 1girl, solo, 18yo, realistic skin texture, photorealistic"
 )
 
 # Removed "face, head, eyes, portrait, cropped" so the AI is allowed to draw her face and take close-ups
 NEGATIVE_PROMPT = (
-    "(deformed iris, deformed pupils, semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime:1.4), "
+    "(deformed iris, deformed pupils, semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime, illustration, painting:1.4), "
     "text, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, "
     "mutilated, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, "
     "bad anatomy, bad proportions, extra limbs, cloned face, disfigured, missing arms, missing legs, long neck"
