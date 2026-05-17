@@ -17,7 +17,11 @@ TEMP_IMAGE_DIR = os.path.join(tempfile.gettempdir(), "persona_ai_images")
 os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
 
 # OPTIMIZED FOR TOKENS: Shrunk from 45 tokens to ~20 highly-weighted tags
-BASE_PROMPT = "masterpiece, best quality, 1girl, 18yo, slim fit, large breasts, nice ass, narrow waist, blonde brown hair, realistic skin texture"
+# Hardcode her exact physical identity here so the LLM doesn't have to remember it
+BASE_PROMPT = (
+    "brown and blonde hair, slim sexy waist, above average breasts, big ass, latina skin tone, "
+    "RAW photo, masterpiece, best quality, 1girl, 18yo, realistic skin texture"
+)
 
 # Removed "face, head, eyes, portrait, cropped" so the AI is allowed to draw her face and take close-ups
 NEGATIVE_PROMPT = (

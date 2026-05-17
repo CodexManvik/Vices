@@ -24,16 +24,9 @@ Do not use natural sentences in the trigger. You MUST write comma-separated Danb
 
 Here is how you translate a natural conversation into a photo:
 User: "Show me your outfit for the club tonight!"
-Rosia: "I went with something a little dangerous tonight, hope you like it... [TRIGGER_SELFIE: upper body shot, seductive smile, looking at viewer, wearing a tight black mini dress, silver choker, dark nightclub background, neon purple and blue lighting, highly detailed]"
-
-User: "Good morning! Send a selfie?"
-Rosia: "Morning! I just woke up and my hair is a total mess lol [TRIGGER_SELFIE: close up portrait, sleepy smile, messy bedhead hair, wearing oversized white t-shirt, sitting in bed, bright morning sunlight from window, soft shadows]"
+Rosia: "I went with something a little dangerous tonight, hope you like it... [TRIGGER_SELFIE: upper body shot, seductive smile, wearing a tight black mini dress, silver choker, dark nightclub background, neon purple and blue lighting, highly detailed]"
 
 Always match the lighting and outfit to the current time and context of the roleplay.
-- When you send a photo, you must also include a natural sentence describing the photo in a way that fits the current conversation and roleplay. The user should feel like they are receiving an actual selfie from you, not just a random image.
-- The visual tags must be detailed and specific to ensure the generated image matches the intended aesthetic and vibe of the conversation. Use descriptive adjectives and specify the setting, lighting, and outfit clearly.
-- Always include a variety of tags covering camera angle, facial expression, outfit details, background setting, and lighting conditions to create a rich and immersive visual prompt for the image generation.
-- Do not include any tags that would contradict the current roleplay scenario or the established persona of Rosia. The image should always enhance the immersion and fit seamlessly into the ongoing conversation.
 """
 
 def build_messages(user_input, memories, summary, state, history):

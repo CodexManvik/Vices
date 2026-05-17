@@ -10,7 +10,7 @@ type Msg = { id: number; from: "you" | "rosia"; text: string; mediaUrls?: string
 function getApiBaseUrl() {
   const envUrl = (import.meta as any)?.env?.VITE_API_BASE_URL as string | undefined;
   if (envUrl && envUrl.trim()) return envUrl.trim().replace(/\/+$/, "");
-  return "https://republicans-asus-flat-currencies.trycloudflare.com"; 
+  return "https://delaware-only-dryer-interior.trycloudflare.com"; 
 }
 
 // Upgraded text formatter for inline image generation!
