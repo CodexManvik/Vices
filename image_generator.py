@@ -40,8 +40,20 @@ def generate_selfie(user_description: str):
     pipe = None  
 
     try:
-        # PUT YOUR ACTUAL FILE PATH HERE
-        local_model_path = r"C:\AI\models\realisticVisionV60B1_v51HyperVAE.safetensors"
+        # Read model path from environment variable or use default
+        local_model_path = os.environ.get(
+            "MODEL_PATH",
+            os.path.expanduser("~/.persona_ai/models/realisticVisionV60B1_v51HyperVAE.safetensors")
+        )
+        
+        # Normalize and expand path
+        local_model_path = os.path.abspath(os.path.expanduser(local_model_path))
+        
+        if not os.path.exists(local_model_path):
+            raise FileNotFoundError(
+                f"Model file not found at {local_model_path}. "
+                f"Set MODEL_PATH environment variable or place model file at the default location."
+            )
         
         print("[IMAGE GEN] Loading official CLIP Text Encoder fallback...")
         text_encoder = CLIPTextModel.from_pretrained(

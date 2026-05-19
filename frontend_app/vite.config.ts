@@ -1,7 +1,11 @@
 import { defineConfig } from 'vite'
 import path from 'path'
+import { fileURLToPath } from 'url'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite' // <--- Restored for v4
+
+// Handle __dirname in ES modules
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 function figmaAssetResolver() {
   return {
@@ -36,5 +40,13 @@ export default defineConfig({
     watch: {
       ignored: ["**/src-tauri/**"],
     },
+    // Use environment variable for dev tunnel URL (ephemeral, update when tunnel expires)
+    proxy: {
+      '/api': {
+        target: process.env.DEV_TUNNEL_URL || 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      }
+    }
   },
 })

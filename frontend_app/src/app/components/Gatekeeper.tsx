@@ -9,8 +9,13 @@ interface GatekeeperProps {
 
 type Status = "idle" | "pinging" | "denied";
 
-// The fixed Gatekeeper URL (Port 9000 for local testing)
-const BROKER_URL = "http://localhost:9000"; 
+// Read broker URL from environment; fallback to localhost for development
+const BROKER_URL = import.meta.env.VITE_BROKER_URL || "http://localhost:9000";
+
+// Validate in production
+if (!import.meta.env.DEV && !import.meta.env.VITE_BROKER_URL) {
+  console.warn("Warning: VITE_BROKER_URL environment variable not set for production. Using localhost.");
+} 
 
 export function Gatekeeper({ onAuthorized, isDark }: GatekeeperProps) {
   const [token, setToken] = useState("");
@@ -32,8 +37,14 @@ export function Gatekeeper({ onAuthorized, isDark }: GatekeeperProps) {
       
       const data = await res.json();
       
-      if (data.status === "allocated") {
-        onAuthorized(data.session_url.replace(/\/+$/, ""));
+      if (data.status === "allocated" && data.session_url) {
+        const url = data.session_url.replace(/\/+$/, "").trim();
+        if (url) {
+          onAuthorized(url);
+        } else {
+          setStatus("denied");
+          setTimeout(() => setStatus("idle"), 2500);
+        }
       } else {
         setStatus("denied");
         setTimeout(() => setStatus("idle"), 2500);

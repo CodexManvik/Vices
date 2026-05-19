@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Gatekeeper } from "./components/Gatekeeper";
 import { Sidebar } from "./components/Sidebar";
@@ -10,6 +10,7 @@ export default function App() {
   const [authorized, setAuthorized] = useState(false);
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(true);
+  const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Real status state
   const [status, setStatus] = useState({ chemistry: 50, mood: "neutral", tone: "casual" });
@@ -43,10 +44,23 @@ export default function App() {
     return () => clearInterval(id);
   }, [sessionUrl]);
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (authTimeoutRef.current) {
+        clearTimeout(authTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleAuthorized = (url: string) => {
     setSessionUrl(url);
+    // Clear any existing timeout first
+    if (authTimeoutRef.current) {
+      clearTimeout(authTimeoutRef.current);
+    }
     // Smooth delay before dropping the lock screen for dramatic effect
-    setTimeout(() => setAuthorized(true), 600);
+    authTimeoutRef.current = setTimeout(() => setAuthorized(true), 600);
   };
 
   return (

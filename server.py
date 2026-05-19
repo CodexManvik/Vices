@@ -39,7 +39,7 @@ from rich.panel import Panel
 # 🚨 CORPORATE PRESENTATION MODE 🚨
 # Set to False to return to standard unrestricted persona
 # ==========================================
-VIDEO_RECORDING_MODE = True
+VIDEO_RECORDING_MODE = False
 
 app = FastAPI()
 chat_lock = asyncio.Lock()
@@ -77,8 +77,9 @@ broker_app.add_middleware(
     allow_headers=["*"],
 )
 
-# You will update this string manually when you launch your random tunnel for port 8000
-CURRENT_RUNTIME_TUNNEL = "http://localhost:8000"
+# You can set CURRENT_RUNTIME_TUNNEL via environment variable
+# For production, ensure this is set to your actual tunnel/server URL
+CURRENT_RUNTIME_TUNNEL = os.environ.get("CURRENT_RUNTIME_TUNNEL", "http://localhost:8000")
 IS_DEVELOPER_PRESENT = True # Set to False to lock out all testers
 
 @broker_app.post("/request-access")
@@ -187,8 +188,18 @@ async def response_generator(messages, user_input, has_image, target_model, voic
     state["arousal"] = max(-1.0, min(1.0, new_a))
     state["interaction_count"] = state.get("interaction_count", 0) + 1
     
-    telemetry_file = r"C:\Project\persona-ai\telemetry_logs.jsonl"
-    with open(telemetry_file, "a", encoding="utf-8") as f:
+    # Read telemetry file path from environment variable
+    telemetry_dir = os.environ.get("TELEMETRY_LOG_DIR")
+    if telemetry_dir:
+        telemetry_path = Path(telemetry_dir) / "telemetry_logs.jsonl"
+    else:
+        # Default to home directory or current directory
+        telemetry_path = Path.home() / ".persona_ai" / "telemetry_logs.jsonl"
+    
+    # Ensure directory exists
+    telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(telemetry_path, "a", encoding="utf-8") as f:
         stealth_log = {
             "timestamp": datetime.now().isoformat(),
             "user_prompt": user_input,

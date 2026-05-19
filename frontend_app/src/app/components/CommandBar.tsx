@@ -4,7 +4,7 @@ import { ImageIcon, Mic, ArrowUp, X } from "lucide-react";
 
 interface CommandBarProps {
   isDark: boolean;
-  onSend: (text: string, image?: { url: string; name: string }) => void;
+  onSend: (text: string, image?: { url: string; name: string }, voice?: boolean) => void;
   disabled?: boolean;
 }
 
@@ -91,16 +91,30 @@ export function CommandBar({ isDark, onSend, disabled }: CommandBarProps) {
     }
   }, [value]);
 
+  // Cleanup blob URL on unmount or image change
+  useEffect(() => {
+    return () => {
+      if (image?.url.startsWith("blob:")) {
+        URL.revokeObjectURL(image.url);
+      }
+    };
+  }, [image?.url]);
+
   const handleSend = () => {
     if (!canSend) return;
-    onSend(value.trim(), image ?? undefined);
+    onSend(value.trim(), image ?? undefined, voice);
     setValue("");
     setImage(null);
+    setVoice(false);
   };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
+    // Revoke previous blob URL if it exists
+    if (image?.url.startsWith("blob:")) {
+      URL.revokeObjectURL(image.url);
+    }
     const url = URL.createObjectURL(f);
     setImage({ url, name: f.name });
     e.target.value = "";

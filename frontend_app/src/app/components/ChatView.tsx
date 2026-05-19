@@ -19,6 +19,7 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
   // Start with a completely clean slate (no hardcoded messages)
   const [messages, setMessages] = useState<Message[]>([]);
   const [typing, setTyping] = useState(false);
+  const messageIdRef = useRef<number>(Date.now());
 
   // Scroll tracking state
   const feedRef = useRef<HTMLDivElement>(null);
@@ -55,12 +56,12 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
   };
 
   // --- CORE STREAMING LOGIC ---
-  const handleSend = async (text: string, files?: File[]) => {
+  const handleSend = async (text: string, image?: { url: string; name: string }, voice?: boolean) => {
     if (!sessionUrl || typing) return;
-    if (!text.trim() && (!files || files.length === 0)) return;
+    if (!text.trim() && (!image)) return;
 
-    const id = Date.now().toString();
-    const assistantId = (Date.now() + 1).toString();
+    const id = (messageIdRef.current++).toString();
+    const assistantId = (messageIdRef.current++).toString();
 
     // Optimistically push the user's message to the UI immediately
     const newMsg: Message = {
@@ -85,10 +86,11 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
       const fd = new FormData();
       fd.append("user_input", text);
       fd.append("target_model", "default");
-      fd.append("voice_requested", "false"); // Change to dynamic if your CommandBar manages voice state
+      fd.append("voice_requested", voice ? "true" : "false");
 
-      if (files && files.length > 0) {
-        files.forEach((file) => fd.append("files", file));
+      if (image) {
+        const blob = await fetch(image.url).then(r => r.blob());
+        fd.append("files", blob, image.name);
       }
 
       const res = await fetch(`${sessionUrl}/chat`, {
@@ -291,7 +293,7 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
       <div className="absolute bottom-8 left-6 right-6 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-[680px] z-50">
         <CommandBar
           isDark={isDark}
-          onSend={(text, files) => handleSend(text, files as any)}
+          onSend={(text, image, voice) => handleSend(text, image, voice)}
           disabled={typing || !sessionUrl}
         />
       </div>
