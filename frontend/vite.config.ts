@@ -36,7 +36,7 @@ export default defineConfig({
   server: {
     allowedHosts: [
       'freeness-gulf-jeep.ngrok-free.dev',
-      'integer-examined-atomic-david.trycloudflare.com'
+      'jacksonville-todd-instantly-routing.trycloudflare.com'
     ]
   },
 

@@ -1,6 +1,8 @@
 # prompt_builder.py
 from state import get_mood_description
 from emotion_engine import get_affective_state
+import pytz
+from datetime import datetime
 
 BASE_PERSONA = """
 You are Rosia, an 18-year-old girl living independently in the UK chatting natively on Discord. You are NOT an AI assistant, and you are NOT a narrator.
@@ -31,11 +33,24 @@ Rosia: "I went with something a little dangerous tonight, hope you like it... [T
 Always match the lighting and outfit to the current time and context of the roleplay.
 """
 
-def build_messages(user_input, memories, summary, state, history):
-    # 1. Base System Prompt
-    system_prompt = f"{BASE_PERSONA}\n\n{PICTURE_SENDING_PROTOCOL}"
+WEB_SEARCH_PROTOCOL = """
+You have access to the live internet. If the user asks about real-time information, weather, current events, or a specific topic you don't know about, you can search the web.
+To search, output EXACTLY this format and nothing else:
+[CALL_TOOL: search, query: "your search terms"]
+"""
 
-    # 2. Inject Dynamic Emotional State
+def get_uk_time():
+    uk_tz = pytz.timezone('Europe/London')
+    return datetime.now(uk_tz).strftime("%A, %I:%M %p")
+
+def build_messages(user_input, memories, summary, state, history):
+    # Base system prompt with new Web Search Protocol
+    system_prompt = f"{BASE_PERSONA}\n\n{PICTURE_SENDING_PROTOCOL}\n\n{WEB_SEARCH_PROTOCOL}"
+    
+    # Inject Live UK Time
+    system_prompt += f"\n\n[SYSTEM CLOCK]\nCurrent UK Time is: {get_uk_time()}"
+
+    # Inject Dynamic Emotional State
     current_v = state.get("valence", 0.20)
     current_a = state.get("arousal", 0.10)
     emotion, tone, _ = get_affective_state(current_v, current_a)
@@ -44,12 +59,10 @@ def build_messages(user_input, memories, summary, state, history):
         f"\n\n[COGNITIVE STATE]\n"
         f"Right now, you are feeling {emotion}. Your internal valence (positivity) is {current_v:.2f} "
         f"and your arousal (energy) is {current_a:.2f}. "
-        f"Adjust your dialogue, formatting, and roleplay actions to naturally reflect a '{tone}' tone. "
-        f"Do not explicitly state your valence/arousal numbers, just act like it."
+        f"Adjust your dialogue, formatting, and roleplay actions to naturally reflect a '{tone}' tone."
     )
     system_prompt += emotional_directive
 
-    # 3. Inject Memories and Graph Summary (RAG Context)
     if memories or summary:
         system_prompt += "\n\n[INTERNAL MEMORY RECALL]\n"
         if summary:
@@ -59,14 +72,9 @@ def build_messages(user_input, memories, summary, state, history):
             for m in memories:
                 system_prompt += f"- {m}\n"
 
-    # Assemble message array for OpenAI SSE format
     messages = [{"role": "system", "content": system_prompt}]
-
-    # 4. Append Conversation History
     for msg in history:
         messages.append(msg)
-
-    # 5. Append Current Input
     messages.append({"role": "user", "content": user_input})
 
     return messages

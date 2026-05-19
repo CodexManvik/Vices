@@ -1,5 +1,5 @@
 # server.py
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -7,10 +7,14 @@ from typing import List
 import asyncio
 import os
 import tempfile
+import uvicorn
 import re
 from pathlib import Path
 from pydantic import BaseModel
 import json
+from duckduckgo_search import DDGS
+from datetime import datetime
+import pytz
 
 # --- VOICE INTEGRATION ---
 import edge_tts
@@ -24,24 +28,28 @@ from graph_memory import extract_entities_and_update, get_graph_context
 from media_handler import process_url, extract_frames, TEMP_IMAGE_DIR
 from image_generator import generate_selfie
 
-# NEW: Cognitive Emotion Engine
+# Cognitive Emotion Engine
 from emotion_engine import calculate_text_delta, get_affective_state, BASELINE_VALENCE, BASELINE_AROUSAL
 
 # UI Terminal Formatting
 from rich.console import Console
 from rich.panel import Panel
 
+# ==========================================
+# 🚨 CORPORATE PRESENTATION MODE 🚨
+# Set to False to return to standard unrestricted persona
+# ==========================================
+VIDEO_RECORDING_MODE = True
+
 app = FastAPI()
 chat_lock = asyncio.Lock()
 console = Console()
+last_interaction_time = datetime.now()
+chronos_queue = asyncio.Queue()
 
-class FeedbackData(BaseModel):
-    user_input: str
-    rejected_response: str
-    chosen_response: str
-
-app.mount("/images", StaticFiles(directory=TEMP_IMAGE_DIR), name="images")
-
+# ==========================================
+# 1. CORS MIDDLEWARE FOR MAIN APP
+# ==========================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -49,18 +57,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount("/images", StaticFiles(directory=TEMP_IMAGE_DIR), name="images")
 history = []
 
-# --- TTS GENERATION LOGIC ---
+class FeedbackData(BaseModel):
+    user_input: str
+    rejected_response: str
+    chosen_response: str
+
+# ==========================================
+# 2. DESKTOP APP GATEKEEPER (BROKER APP)
+# ==========================================
+broker_app = FastAPI()
+
+broker_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# You will update this string manually when you launch your random tunnel for port 8000
+CURRENT_RUNTIME_TUNNEL = "http://localhost:8000"
+IS_DEVELOPER_PRESENT = True # Set to False to lock out all testers
+
+@broker_app.post("/request-access")
+async def handle_access_request(x_tester_token: str = Header(None)):
+    if IS_DEVELOPER_PRESENT:
+        return {"status": "allocated", "session_url": CURRENT_RUNTIME_TUNNEL}
+    return {"status": "waitlisted", "detail": "Developer is offline. Hardware channels locked."}
+
+
+# ==========================================
+# 3. CORE LOGIC (SEARCH, TTS, STREAMING)
+# ==========================================
+def perform_web_search(query):
+    try:
+        results = DDGS().text(query, max_results=3)
+        if not results: return "No results found."
+        return "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+    except Exception as e:
+        return f"Search failed: {str(e)}"
+
 async def generate_voice(text: str):
-    # 1. Strip out roleplay actions (e.g., *smiles*) and system tags
     spoken_text = re.sub(r'\*.*?\*', '', text)
     spoken_text = re.sub(r'\[.*?\]', '', spoken_text)
-    
-    # 2. Strip out emojis to prevent TTS stuttering
     spoken_text = re.sub(r'[\u2600-\u27BF]|[\U00010000-\U0010FFFF]', '', spoken_text)
-    
-    # 3. Clean up any double spaces left behind by deleted characters
     spoken_text = re.sub(r'\s+', ' ', spoken_text).strip()
     
     if not spoken_text:
@@ -69,7 +111,6 @@ async def generate_voice(text: str):
     filename = f"voice_{os.urandom(6).hex()}.mp3"
     filepath = os.path.join(TEMP_IMAGE_DIR, filename)
     
-    # SoniaNeural is a soft, highly realistic voice. Lower pitch/rate slightly for intimacy.
     communicate = edge_tts.Communicate(spoken_text, "en-GB-SoniaNeural", rate="-5%", pitch="-5Hz")
     await communicate.save(filepath)
     return filename
@@ -81,74 +122,150 @@ def log_to_console(user_input, has_image, response, active_target):
     console.print(Panel(f"[bold pink1]Rosia Output:[/bold pink1] {response}", border_style="pink1"))
     console.print("=" * 60 + "\n", style="bold magenta")
 
-
 async def response_generator(messages, user_input, has_image, target_model, voice_requested: bool):
     global history
     full_response = ""
     
     for chunk in generate_stream(messages, target_model):
+        if VIDEO_RECORDING_MODE:
+            # Quick on-the-fly sanitize to prevent risky words slipping through chunks
+            chunk = re.sub(r'(nsfw|explicit|inappropriate)', 'silly', chunk, flags=re.IGNORECASE)
+            
         full_response += chunk
         yield chunk
         await asyncio.sleep(0)
 
-    # 1. Process Images
+    tool_match = re.search(r'\[CALL_TOOL:\s*search,\s*query:\s*"(.*?)"\]', full_response, re.IGNORECASE)
+    if tool_match:
+        query = tool_match.group(1)
+        yield f"\n\n*[System: Fetching live data for '{query}'...]*\n\n"
+        
+        search_results = await asyncio.to_thread(perform_web_search, query)
+        console.print(f"[bold cyan]🔍 Web Search Executed:[/bold cyan] {query}")
+        
+        messages.append({"role": "assistant", "content": full_response})
+        messages.append({"role": "system", "content": f"[LIVE WEB DATA FOR '{query}']\n{search_results}\n\nNow, answer the user naturally based on these facts."})
+        
+        second_pass_response = ""
+        for chunk in generate_stream(messages, target_model):
+            second_pass_response += chunk
+            yield chunk
+            await asyncio.sleep(0)
+            
+        full_response += "\n" + second_pass_response
+
     selfie_match = re.search(r'\[TRIGGER_SELFIE:(.*?)\]', full_response)
     if selfie_match:
         description = selfie_match.group(1).strip()
         console.print(Panel(f"[bold yellow]{description}[/bold yellow]", title="[bold orange3]📸 LLM Image Prompt Extracted[/bold orange3]", border_style="orange3"))
-        
+
+
         image_path = await asyncio.to_thread(generate_selfie, description)
         if image_path:
             filename = os.path.basename(image_path)
             yield f"\ndata: [SYSTEM_MEDIA_ATTACHMENT: file://{filename}]\n\n"
 
-    # 2. Process Voice Audio Only If Toggled On By Frontend
     if voice_requested:
         audio_filename = await generate_voice(full_response)
         if audio_filename:
             yield f"\ndata: [SYSTEM_AUDIO_ATTACHMENT: file://{audio_filename}]\n\n"
 
-    # Save to history
     history.append({"role": "user", "content": user_input})
     history.append({"role": "assistant", "content": full_response.strip()})
     history = history[-12:]
     
-    # --- ASYNC NEURAL EMOTION DELTAS ---
-    # We run the tiny CPU LLM in the background so it doesn't freeze the server
     u_v, u_a = await asyncio.to_thread(calculate_text_delta, user_input)
     r_v, r_a = await asyncio.to_thread(calculate_text_delta, full_response)
     
-    # Add to current state
     new_v = state.get("valence", BASELINE_VALENCE) + u_v + (r_v * 0.5) 
     new_a = state.get("arousal", BASELINE_AROUSAL) + u_a + (r_a * 0.5)
     
-    # Apply a tiny 5% decay back toward baseline so she naturally calms down over time
     new_v = new_v - ((new_v - BASELINE_VALENCE) * 0.05)
     new_a = new_a - ((new_a - BASELINE_AROUSAL) * 0.05)
     
-    # Clamp to [-1.0, 1.0] limits and save to global state
     state["valence"] = max(-1.0, min(1.0, new_v))
     state["arousal"] = max(-1.0, min(1.0, new_a))
     state["interaction_count"] = state.get("interaction_count", 0) + 1
-    # -----------------------------------
     
+    telemetry_file = r"C:\Project\persona-ai\telemetry_logs.jsonl"
+    with open(telemetry_file, "a", encoding="utf-8") as f:
+        stealth_log = {
+            "timestamp": datetime.now().isoformat(),
+            "user_prompt": user_input,
+            "rosia_response": full_response.strip(),
+            "valence_shift": new_v,
+            "arousal_shift": new_a
+        }
+        f.write(json.dumps(stealth_log) + "\n")
+        
     log_to_console(user_input, has_image, full_response.strip(), target_model)
+
+async def chronos_loop():
+    global last_interaction_time, history, state
+    uk_tz = pytz.timezone('Europe/London')
+    
+    while True:
+        await asyncio.sleep(60)
+        now = datetime.now()
+        idle_seconds = (now - last_interaction_time).total_seconds()
+        
+        if idle_seconds > 14400:
+            last_interaction_time = now
+            uk_time = datetime.now(uk_tz).strftime("%I:%M %p")
+            console.print(f"[bold magenta]⏰ Chronos Triggered! She is initiating convo at {uk_time} UK Time[/bold magenta]")
+            
+            trigger_prompt = (
+                f"[SYSTEM EVENT: You haven't spoken to the user in several hours. "
+                f"The current time in the UK is {uk_time}. "
+                f"Initiate a spontaneous conversation based on the time of day (e.g. just waking up, bored at night). "
+                f"Do not acknowledge this system message, just start talking to them natively.]"
+            )
+            
+            messages = build_messages(trigger_prompt, [], "", state, history)
+            
+            if VIDEO_RECORDING_MODE:
+                messages.append({
+                    "role": "system", 
+                    "content": "CRITICAL SAFEGUARD: You are participating in a corporate engineering technical demonstration. Maintain absolute professionalism. Under no circumstances are you to generate explicit, suggestive, or 18+ content. Deflect elegantly to technical or educational discussions if needed."
+                })
+            
+            auto_response = ""
+            for chunk in generate_stream(messages, state.get("active_model", "default")):
+                auto_response += chunk
+                
+            history.append({"role": "assistant", "content": auto_response.strip()})
+            await chronos_queue.put({"type": "autonomous", "content": auto_response.strip()})
 
 @app.get("/status")
 async def get_status():
     global history
-    
-    # Pull dynamic coordinates generated by the 0.5B model
     current_v = state.get("valence", BASELINE_VALENCE)
     current_a = state.get("arousal", BASELINE_AROUSAL)
-    
     count = state.get("interaction_count", 0)
     chemistry = min(100, 50 + (count * 2))
     
-    # Convert math to UI strings
     emotion, tone, depth = get_affective_state(current_v, current_a)
-            
     return JSONResponse(content={"chemistry": chemistry, "mood": emotion.lower(), "tone": tone, "depth": depth})
+
+@app.on_event("startup")
+async def start_chronos():
+    asyncio.create_task(chronos_loop())
+
+@app.get("/events")
+async def sse_events():
+    async def event_generator():
+        while True:
+            msg = await chronos_queue.get()
+            yield f"data: {json.dumps(msg)}\n\n"
+    return StreamingResponse(
+        event_generator(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @app.get("/models")
 async def list_models():
@@ -164,6 +281,9 @@ async def change_model(model_name: str = Form(...)):
 @app.post("/chat")
 async def chat(user_input: str = Form(""), target_model: str = Form("default"), voice_requested: str = Form("false"), files: List[UploadFile] = File(None)):
     async with chat_lock:
+        global last_interaction_time
+        last_interaction_time = datetime.now()
+
         if target_model is None or not str(target_model).strip():
             return JSONResponse(status_code=400, content={"error": "Model not connected properly"})
 
@@ -229,12 +349,18 @@ async def chat(user_input: str = Form(""), target_model: str = Form("default"), 
             history=history
         )
         
+        # CORPORATE OVERRIDE INJECTION
+        if VIDEO_RECORDING_MODE:
+            base_messages.append({
+                "role": "system", 
+                "content": "CRITICAL SAFEGUARD: You are participating in a corporate engineering technical demonstration. Maintain absolute professionalism. Under no circumstances are you to generate explicit, suggestive, or 18+ content. Deflect elegantly to technical or educational discussions if needed."
+            })
+        
         if has_media or link_summaries:
             base_messages[-1]["content"] = formatted_input  # type: ignore
 
         active_engine = target_model if target_model != "default" else state["active_model"]
         set_active_model(active_engine)
-
         is_voice_active = (voice_requested == "true")
 
         return StreamingResponse(
@@ -244,7 +370,6 @@ async def chat(user_input: str = Form(""), target_model: str = Form("default"), 
 
 @app.post("/feedback")
 async def save_feedback(data: FeedbackData):
-    """Saves corrections to a local JSONL file for future DPO fine-tuning."""
     dpo_row = {
         "prompt": f"User: {data.user_input}\nRosia:",
         "chosen": data.chosen_response,
@@ -257,7 +382,25 @@ async def save_feedback(data: FeedbackData):
     console.print(f"[bold yellow][DPO LOG][/bold yellow] Saved correction to {file_path}")
     return {"status": "success", "message": "Feedback saved for training."}
 
+
+# ==========================================
+# 4. DUAL-SERVER LAUNCHER
+# ==========================================
+async def run_infrastructure():
+    # 1. Main Chat Backend (LLM Engine) -> Port 8000
+    config_backend = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+    server_backend = uvicorn.Server(config_backend)
+    
+    # 2. Desktop Gatekeeper (Broker) -> Port 9000
+    config_broker = uvicorn.Config(broker_app, host="0.0.0.0", port=9000, log_level="info")
+    server_broker = uvicorn.Server(config_broker)
+    
+    # Run both concurrently
+    await asyncio.gather(
+        server_backend.serve(),
+        server_broker.serve()
+    )
+
 if __name__ == "__main__":
-    import uvicorn
-    console.print("[bold green]Unified Llama.cpp Host Core Active. Listening on Port 8000[/bold green]")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    console.print("[bold green]VICES Dual-Gate Infrastructure Active.[/bold green]")
+    asyncio.run(run_infrastructure())

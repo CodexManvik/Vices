@@ -10,19 +10,35 @@ type Msg = { id: number; from: "you" | "rosia"; text: string; mediaUrls?: string
 function getApiBaseUrl() {
   const envUrl = (import.meta as any)?.env?.VITE_API_BASE_URL as string | undefined;
   if (envUrl && envUrl.trim()) return envUrl.trim().replace(/\/+$/, "");
-  return "https://begun-uses-junior-venture.trycloudflare.com"; 
+  return "https://part-paradise-creativity-containers.trycloudflare.com"; 
 }
 
 const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 function formatMessageText(text: string, mediaUrls: string[] = [], isAi: boolean = false) {
   if (!text) return null;
-  const parts = text.split(/(\[TRIGGER_SELFIE:[^\]]*\]?|\*\*.*?\*\*)/g);
+  
+  // 1. UPDATED REGEX: Now catches Links alongside Bolding and Selfies
+  const parts = text.split(/(\[TRIGGER_SELFIE:[^\]]*\]?|\*\*.*?\*\*|\*[^*]+\*|https?:\/\/[^\s]+)/g);
   
   return parts.map((part, index) => {
+    // Handle URLs / Links
+    if (part.match(/^https?:\/\/[^\s]+/)) {
+      return (
+        <a key={index} href={part} target="_blank" rel="noopener noreferrer" className="text-[#e87a8c] underline underline-offset-2 hover:text-white transition-colors break-all">
+          {part}
+        </a>
+      );
+    }
+    // Handle double asterisk **
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       return <strong key={index} className="font-bold text-neutral-50 drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]">{part.slice(2, -2)}</strong>;
     }
+    // Handle single asterisk *
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      return <strong key={index} className="font-bold text-[#e87a8c] italic">{part.slice(1, -1)}</strong>;
+    }
+    // Handle Image Trigger
     if (isAi && part.startsWith('[TRIGGER_SELFIE:')) {
        if (mediaUrls && mediaUrls.length > 0) {
           return <div key={index} className="my-3 rounded-xl overflow-hidden border border-[#5a1828]/60 shadow-[0_8px_30px_rgba(140,20,40,0.3)] w-full sm:w-80"><img src={mediaUrls[0]} alt="Selfie" className="w-full h-auto object-cover" /></div>;
@@ -37,11 +53,8 @@ function formatMessageText(text: string, mediaUrls: string[] = [], isAi: boolean
 export default function App() {
   const apiBaseUrl = getApiBaseUrl();
 
-  const [activeTab, setActiveTab] = useState<"chat" | "models">("chat");
   const [message, setMessage] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [selectedModel, setSelectedModel] = useState("dolphin-mistral-24b.gguf");
-  const [modelOpen, setModelOpen] = useState(false);
   const [typing, setTyping] = useState(false);
   const [activityStatus, setActivityStatus] = useState<string>("typing...");
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -62,13 +75,6 @@ export default function App() {
     typingRef.current = typing;
   }, [voiceEnabled, typing]);
 
-  const [models, setModels] = useState<string[]>([
-    "dolphin-mistral-24b.gguf",
-    "noir-llama-70b.gguf",
-    "obsidian-claude.gguf",
-    "midnight-gpt-4.gguf",
-  ]);
-
   const [messages, setMessages] = useState<Msg[]>([]);
   const [showNotice, setShowNotice] = useState(true);
   const [_status, setStatus] = useState({ chemistry: 50, mood: "neutral", tone: "casual", depth: "surface" });
@@ -88,31 +94,6 @@ export default function App() {
       const res = await fetch(`${apiBaseUrl}/status`, { headers: { "ngrok-skip-browser-warning": "bypass" } });
       if (res.ok) setStatus(await res.json());
     } catch {}
-  }
-
-  async function fetchModels() {
-    setErrorText(null);
-    try {
-      const res = await fetch(`${apiBaseUrl}/models`, { method: "GET", headers: { "ngrok-skip-browser-warning": "bypass" } });
-      if (!res.ok) throw new Error(`GET /models failed (${res.status})`);
-      const data = (await res.json()) as { models: string[]; active?: string };
-      if (Array.isArray(data.models) && data.models.length) setModels(data.models);
-      if (data.active) setSelectedModel(data.active);
-    } catch (e: any) {
-      setErrorText(e?.message ?? "Failed to load models from backend.");
-    }
-  }
-
-  async function switchModel(nextModel: string) {
-    setErrorText(null);
-    setSelectedModel(nextModel);
-    try {
-      const fd = new FormData();
-      fd.append("model_name", nextModel);
-      await fetch(`${apiBaseUrl}/switch_model`, { method: "POST", body: fd, headers: { "ngrok-skip-browser-warning": "bypass" } });
-    } catch (e: any) {
-      setErrorText(e?.message ?? "Failed to switch model.");
-    }
   }
 
   function appendToAssistant(assistantId: number, chunkText: string) {
@@ -148,6 +129,25 @@ export default function App() {
       console.error("Failed to save feedback", e);
     }
   }
+
+  // --- AUTONOMOUS MESSAGES (CHRONOS LOOP) FIX ---
+  useEffect(() => {
+    const eventSource = new EventSource(`${apiBaseUrl}/events`);
+    eventSource.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'autonomous') {
+                setMessages(prev => [
+                    ...prev, 
+                    { id: Date.now(), from: 'rosia', text: data.content, mediaUrls: [] } 
+                ]);
+            }
+        } catch (e) {
+            console.error("Failed to parse SSE event", e);
+        }
+    };
+    return () => eventSource.close();
+  }, [apiBaseUrl]); 
 
   // --- AUTOMATED LOOP SPEECH RECOGNITION CONTROLLER ---
   useEffect(() => {
@@ -194,7 +194,6 @@ export default function App() {
       };
 
       recognition.onend = () => {
-        // Auto-restart loop to keep ambient mode active if browser idles out
         if (voiceEnabledRef.current && !typingRef.current) {
           try { recognition.start(); } catch {}
         }
@@ -204,7 +203,7 @@ export default function App() {
       recognitionRef.current = recognition;
     } else {
       if (recognitionRef.current) {
-        recognitionRef.current.onend = null; // Unlink loop callback to prevent recursion cascades
+        recognitionRef.current.onend = null; 
         recognitionRef.current.stop();
         recognitionRef.current = null;
       }
@@ -252,8 +251,8 @@ export default function App() {
     try {
       const fd = new FormData();
       fd.append("user_input", t);
-      fd.append("target_model", selectedModel);
-      fd.append("voice_requested", voiceEnabled ? "true" : "false"); // Let backend know toggle state
+      fd.append("target_model", "default"); // Force default engine
+      fd.append("voice_requested", voiceEnabled ? "true" : "false"); 
       selectedFiles.forEach((file) => fd.append("files", file));
 
       const res = await fetch(`${apiBaseUrl}/chat`, { method: "POST", body: fd, headers: { "ngrok-skip-browser-warning": "bypass" } });
@@ -309,7 +308,6 @@ export default function App() {
     }
   }
 
-  useEffect(() => { fetchModels(); }, []);
   const inputDisabled = useMemo(() => typing, [typing]);
 
   if (showNotice) {
@@ -323,9 +321,11 @@ export default function App() {
               <div className="mt-4 text-sm leading-relaxed text-neutral-300 space-y-3">
                 <p>• <span className="text-[#e87a8c] font-medium">No data is saved anywhere</span> This is a fully private experience.</p>
                 <p>• <span className="text-[#e87a8c] font-medium">Actively in development</span> You can experiment freely and go as degenerate as you want 😉</p>
-                <p>• <span className="text-[#e87a8c] font-medium">Your feedback matters</span> DM me on Discord with suggestions, bugs, or ideas.</p>
-                <p>• <span className="text-[#e87a8c] font-medium">The model WILL hallucinate</span> I am currently working on this.</p>
-                <p>• <span className="text-[#e87a8c] font-medium">Fictional Selfies</span> The image generator is not trained on real photos of anyone.</p>
+                <p>• <span className="text-[#e87a8c] font-medium">Rosia can now understand emotions better</span> And reciprocate them</p>
+                <p>• <span className="text-[#e87a8c] font-medium">Fictional Selfies</span> The image generator is not trained on real photos of anyone</p>
+                <p>• <span className="text-[#e87a8c] font-medium">Rosia can now chat with voice and understand your voice too</span> Only available on Chrome and Edge</p>
+                <p>• <span className="text-[#e87a8c] font-medium">Realtime Web Search</span> Rosia can freely do realtime web searches, now that's great</p>
+                <p>• <span className="text-[#e87a8c] font-medium">Your feedback matters</span> DM me on Discord with suggestions, bugs, or ideas</p>
               </div>
             </div>
             <button onClick={() => setShowNotice(false)} className="w-full md:w-auto shrink-0 h-11 px-6 rounded-xl bg-gradient-to-br from-[#5a0c1c] via-[#8a1a30] to-[#3a0814] border border-[#c8324a]/40 text-neutral-100 text-xs uppercase tracking-[0.25em] shadow-[0_0_25px_rgba(140,20,40,0.4)]">enter</button>
@@ -356,24 +356,10 @@ export default function App() {
               <span className="tracking-[0.3em] text-neutral-100" style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: "1.5rem" }}>VICES</span>
             </div>
           </div>
-          <div className="hidden md:flex gap-1 bg-black/60 p-1 rounded-full border border-white/[0.05]">
-            {(["chat", "models"] as const).map((tab) => (
-              <button key={tab} onClick={() => { setActiveTab(tab); if (tab === "models") fetchModels(); }} className="relative px-7 py-2 rounded-full text-xs uppercase tracking-[0.25em]">
-                {activeTab === tab && <motion.div layoutId="tab" className="absolute inset-0 rounded-full bg-gradient-to-r from-[#5a0c1c] to-[#8a1a30]" />}
-                <span className={`relative ${activeTab === tab ? "text-white" : "text-neutral-500"}`}>{tab}</span>
-              </button>
-            ))}
-          </div>
         </motion.nav>
 
-        <div className="md:hidden flex px-4 pt-3 gap-2">
-           {(["chat", "models"] as const).map((tab) => (
-              <button key={tab} onClick={() => { setActiveTab(tab); if (tab === "models") fetchModels(); }} className={`flex-1 py-2 rounded-xl text-[10px] uppercase tracking-[0.2em] ${activeTab === tab ? "bg-[#c8324a]/20 text-[#e87a8c]" : "bg-black/40 text-neutral-500"}`}>{tab}</button>
-            ))}
-        </div>
-
         <div className="flex-1 grid grid-cols-1 md:grid-cols-[400px_1fr] lg:grid-cols-[440px_1fr] gap-3 md:gap-6 p-3 md:p-6 overflow-hidden">
-          <motion.aside initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className={`relative rounded-3xl overflow-hidden border border-white/[0.06] bg-gradient-to-b from-white/[0.02] to-transparent ${activeTab !== 'chat' ? 'hidden md:block' : ''}`}>
+          <motion.aside initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="relative hidden md:block rounded-3xl overflow-hidden border border-white/[0.06] bg-gradient-to-b from-white/[0.02] to-transparent">
             <div className="absolute inset-0 bg-gradient-to-b from-[#0a040a] via-[#08030a] to-black" />
             <div className="relative h-full flex flex-col p-4 md:p-6">
               <div className="flex items-center justify-between mb-4">
@@ -390,159 +376,139 @@ export default function App() {
             </div>
           </motion.aside>
 
-          <motion.section initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className={`relative flex flex-col rounded-3xl overflow-hidden border border-white/[0.06] bg-gradient-to-b from-white/[0.02] to-transparent ${activeTab === 'chat' && window.innerWidth < 768 ? 'mt-0' : ''}`}>
+          <motion.section initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="relative flex flex-col rounded-3xl overflow-hidden border border-white/[0.06] bg-gradient-to-b from-white/[0.02] to-transparent">
             <div className="absolute inset-0 bg-gradient-to-br from-[#0a040a] via-black to-[#08030a]" />
 
             <div className="relative px-4 md:px-7 py-3 md:py-5 border-b border-white/[0.05] flex items-center justify-between">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-500 hidden sm:block">{activeTab === "models" ? "models" : "conversation"}</p>
+                <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-500 hidden sm:block">conversation</p>
                 <h2 className="text-neutral-100 sm:mt-0.5 text-lg sm:text-2xl" style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300 }}>
-                  {activeTab === "models" ? "choose your engine" : "whispers in the dark"}
+                  whispers in the dark
                 </h2>
               </div>
-              {activeTab === "models" ? (
-                <button onClick={() => fetchModels()} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-black/40"><span className="text-[10px] sm:text-xs text-neutral-300">refresh</span></button>
-              ) : (
-                <button onClick={() => setModelOpen(!modelOpen)} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-black/40">
-                  <span className="text-[10px] sm:text-xs text-neutral-300 font-mono truncate">{selectedModel}</span>
-                </button>
-              )}
             </div>
 
             <div className="relative flex-1 overflow-y-auto px-3 md:px-7 py-4 space-y-4 md:space-y-5 scrollbar-thin" ref={feedRef}>
-              {activeTab === "models" ? (
-                <div className="space-y-3">
-                  {models.map((m: string) => (
-                    <button key={m} onClick={() => switchModel(m)} className={`w-full text-left px-4 py-3 rounded-2xl border ${m === selectedModel ? "bg-[#c8324a]/10 border-[#c8324a]/30 text-[#e87a8c]" : "bg-white/[0.02] border-white/[0.06] text-neutral-300"}`}>
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <>
-                  <AnimatePresence initial={false}>
-                    {messages.map((m: Msg) => (
-                      <motion.div key={m.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${m.from === "you" ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[92%] sm:max-w-[80%] md:max-w-[68%] ${m.from === "you" ? "items-end" : "items-start"} flex flex-col`}>
-                          <span className={`text-[9px] uppercase tracking-[0.3em] mb-1.5 ml-1 ${m.from === "you" ? "text-neutral-600" : "text-[#e87a8c]"}`}>{m.from}</span>
-                          {m.from === "you" ? (
-                            <div className="flex flex-col gap-2 items-end">
-                              {m.mediaUrls && m.mediaUrls.length > 0 && (
-                                <div className="flex gap-2 flex-wrap justify-end">
-                                  {m.mediaUrls.map((url, idx) => (<div key={idx} className="rounded-xl overflow-hidden border border-white/[0.06] w-32 sm:w-48"><img src={url} alt="uploaded" className="w-full h-auto object-cover" /></div>))}
-                                </div>
-                              )}
-                              {m.text && <div className="px-4 md:px-5 py-2.5 md:py-3 rounded-2xl rounded-tr-md bg-gradient-to-br from-[#1a1418] to-[#0a0608] border border-white/[0.06] text-neutral-200 text-[13px] md:text-sm">{formatMessageText(m.text)}</div>}
+              <AnimatePresence initial={false}>
+                {messages.map((m: Msg) => (
+                  <motion.div key={m.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${m.from === "you" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[92%] sm:max-w-[80%] md:max-w-[68%] ${m.from === "you" ? "items-end" : "items-start"} flex flex-col`}>
+                      <span className={`text-[9px] uppercase tracking-[0.3em] mb-1.5 ml-1 ${m.from === "you" ? "text-neutral-600" : "text-[#e87a8c]"}`}>{m.from}</span>
+                      {m.from === "you" ? (
+                        <div className="flex flex-col gap-2 items-end">
+                          {m.mediaUrls && m.mediaUrls.length > 0 && (
+                            <div className="flex gap-2 flex-wrap justify-end">
+                              {m.mediaUrls.map((url, idx) => (<div key={idx} className="rounded-xl overflow-hidden border border-white/[0.06] w-32 sm:w-48"><img src={url} alt="uploaded" className="w-full h-auto object-cover" /></div>))}
                             </div>
-                          ) : (
-                            <div className="flex flex-col gap-2 items-start w-full relative group">
-                              {m.text && (
-                                <div className="relative px-4 md:px-5 py-2.5 md:py-3 rounded-2xl rounded-tl-md bg-gradient-to-br from-[#2a0810] to-[#1a040a] border border-[#5a1828]/40 text-neutral-100 text-[13px] md:text-sm w-full group">
-                                  <div className="relative whitespace-pre-wrap flex flex-col gap-1">{formatMessageText(m.text, m.mediaUrls, m.from === "rosia")}</div>
-                                  {!correctingId && (
-                                    <button onClick={() => { setCorrectingId(m.id); setCorrectionText(m.text); }} className="absolute -right-2 -top-3 md:-right-8 md:top-2 p-1.5 rounded-lg bg-[#1a040a] border border-[#5a1828]/40 text-neutral-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 hover:text-[#e87a8c]">
-                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                    </button>
-                                  )}
-                                  {correctingId === m.id && (
-                                    <div className="mt-3 pt-3 border-t border-[#5a1828]/40 flex flex-col gap-2 w-full">
-                                      <span className="text-[10px] uppercase text-[#e87a8c]">Teach Rosia:</span>
-                                      <textarea value={correctionText} onChange={(e) => setCorrectionText(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg p-3 text-[13px] text-neutral-200" rows={3} />
-                                      <div className="flex justify-end gap-2 mt-1">
-                                        <button onClick={() => setCorrectingId(null)} className="px-4 py-1.5 rounded-lg text-[10px] uppercase text-neutral-400">Cancel</button>
-                                        <button onClick={() => { const previousUserPrompt = [...messages].reverse().find(msg => msg.id < m.id && msg.from === "you")?.text || "Unknown Context"; submitCorrection(previousUserPrompt, m.text); }} className="px-4 py-1.5 rounded-lg text-[10px] uppercase bg-[#c8324a]/20 text-[#e87a8c]">Save</button>
-                                      </div>
-                                    </div>
-                                  )}
+                          )}
+                          {/* 2. UPDATED USER MESSAGE BUBBLE: Added 'whitespace-pre-wrap' so spacing and Shift+Enter newlines visually render */}
+                          {m.text && <div className="px-4 md:px-5 py-2.5 md:py-3 rounded-2xl rounded-tr-md bg-gradient-to-br from-[#1a1418] to-[#0a0608] border border-white/[0.06] text-neutral-200 text-[13px] md:text-sm whitespace-pre-wrap">{formatMessageText(m.text)}</div>}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-2 items-start w-full relative group">
+                          {m.text && (
+                            <div className="relative px-4 md:px-5 py-2.5 md:py-3 rounded-2xl rounded-tl-md bg-gradient-to-br from-[#2a0810] to-[#1a040a] border border-[#5a1828]/40 text-neutral-100 text-[13px] md:text-sm w-full group">
+                              <div className="relative whitespace-pre-wrap flex flex-col gap-1">{formatMessageText(m.text, m.mediaUrls, true)}</div>
+                              {!correctingId && (
+                                <button onClick={() => { setCorrectingId(m.id); setCorrectionText(m.text); }} className="absolute -right-2 -top-3 md:-right-8 md:top-2 p-1.5 rounded-lg bg-[#1a040a] border border-[#5a1828]/40 text-neutral-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 hover:text-[#e87a8c]">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                </button>
+                              )}
+                              {correctingId === m.id && (
+                                <div className="mt-3 pt-3 border-t border-[#5a1828]/40 flex flex-col gap-2 w-full">
+                                  <span className="text-[10px] uppercase text-[#e87a8c]">Teach Rosia:</span>
+                                  <textarea value={correctionText} onChange={(e) => setCorrectionText(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg p-3 text-[13px] text-neutral-200" rows={3} />
+                                  <div className="flex justify-end gap-2 mt-1">
+                                    <button onClick={() => setCorrectingId(null)} className="px-4 py-1.5 rounded-lg text-[10px] uppercase text-neutral-400">Cancel</button>
+                                    <button onClick={() => { const previousUserPrompt = [...messages].reverse().find(msg => msg.id < m.id && msg.from === "you")?.text || "Unknown Context"; submitCorrection(previousUserPrompt, m.text); }} className="px-4 py-1.5 rounded-lg text-[10px] uppercase bg-[#c8324a]/20 text-[#e87a8c]">Save</button>
+                                  </div>
                                 </div>
                               )}
                             </div>
                           )}
                         </div>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
 
-                  {errorText && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
-                      <div className="px-4 py-3 rounded-2xl rounded-tl-md bg-red-950/40 border border-red-500/30 text-red-200 text-sm shadow-[0_8px_30px_rgba(255,0,0,0.12)]">
-                        {errorText}
-                      </div>
-                    </motion.div>
-                  )}
+              {errorText && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
+                  <div className="px-4 py-3 rounded-2xl rounded-tl-md bg-red-950/40 border border-red-500/30 text-red-200 text-sm shadow-[0_8px_30px_rgba(255,0,0,0.12)]">
+                    {errorText}
+                  </div>
+                </motion.div>
+              )}
 
-                  {typing && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
-                      <div className="flex flex-col">
-                        <span className="text-[9px] uppercase tracking-[0.3em] mb-1.5 text-[#e87a8c] ml-1 flex items-center gap-2">
-                          rosia <span className="text-neutral-500 lowercase tracking-widest">{activityStatus}</span>
-                        </span>
-                        <div className="px-5 py-4 rounded-2xl rounded-tl-md bg-gradient-to-br from-[#2a0810] to-[#1a040a] border border-[#5a1828]/40 flex gap-1.5 w-fit">
-                          {[0, 1, 2].map((i) => (<motion.div key={i} className="w-1.5 h-1.5 rounded-full bg-[#e87a8c]" animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }} transition={{ duration: 1, repeat: Infinity, delay: i * 0.15 }} />))}
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </>
+              {typing && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
+                  <div className="flex flex-col">
+                    <span className="text-[9px] uppercase tracking-[0.3em] mb-1.5 text-[#e87a8c] ml-1 flex items-center gap-2">
+                      rosia <span className="text-neutral-500 lowercase tracking-widest">{activityStatus}</span>
+                    </span>
+                    <div className="px-5 py-4 rounded-2xl rounded-tl-md bg-gradient-to-br from-[#2a0810] to-[#1a040a] border border-[#5a1828]/40 flex gap-1.5 w-fit">
+                      {[0, 1, 2].map((i) => (<motion.div key={i} className="w-1.5 h-1.5 rounded-full bg-[#e87a8c]" animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }} transition={{ duration: 1, repeat: Infinity, delay: i * 0.15 }} />))}
+                    </div>
+                  </div>
+                </motion.div>
               )}
             </div>
 
             {/* Chat Input Area */}
-            {activeTab === "chat" && (
-              <div className="relative border-t border-white/[0.05] p-2 md:p-4 bg-black/60 backdrop-blur-xl">
-                {selectedFiles.length > 0 && (
-                  <div className="flex gap-2 mb-3 overflow-x-auto pb-2 scrollbar-thin">
-                    {selectedFiles.map((file, idx) => (
-                       <div key={idx} className="relative w-16 h-16 shrink-0 rounded-lg border border-white/[0.1] overflow-hidden bg-[#1a1a1a]">
-                          {file.type.startsWith('image/') || file.type.startsWith('video/') ? (
-                             <img src={URL.createObjectURL(file)} className="w-full h-full object-cover opacity-80" alt="preview" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-[8px] text-neutral-400 text-center p-1 break-all bg-black/50">{file.name}</div>
-                          )}
-                          <button onClick={() => removeFile(idx)} className="absolute top-1 right-1 w-4 h-4 bg-black/70 rounded-full flex items-center justify-center text-white"><X className="w-3 h-3" /></button>
-                       </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex items-end gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
-                  <div className="flex gap-2">
-                    <input type="file" accept="image/*,video/*,.gif" multiple onChange={(e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) setSelectedFiles((prev) => [...prev, ...Array.from(e.target.files!)]); if (e.target) e.target.value = ""; }} hidden id="media-input" />
-                    
-                    {/* Media Upload Button */}
-                    <button onClick={() => document.getElementById("media-input")?.click()} className={`w-10 h-10 sm:w-11 sm:h-11 shrink-0 rounded-xl border flex items-center justify-center transition-all ${selectedFiles.length > 0 ? "border-[#c8324a]/50 bg-[#c8324a]/10" : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"}`}>
-                      <ImagePlus className={`w-4 h-4 ${selectedFiles.length > 0 ? "text-[#e87a8c]" : "text-neutral-500"}`} />
-                    </button>
-
-                    {/* Microphone Toggle Button */}
-                    <button 
-                      onClick={toggleRecording} 
-                      className={`w-10 h-10 sm:w-11 sm:h-11 shrink-0 rounded-xl border flex items-center justify-center transition-all ${voiceEnabled ? "border-[#c8324a] bg-[#c8324a]/20 animate-pulse shadow-[0_0_15px_rgba(200,50,74,0.4)] animate-pulse" : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"}`}
-                      title={voiceEnabled ? "Disable Voice Mode" : "Enable Voice Mode"}
-                    >
-                      <Mic className={`w-4 h-4 ${voiceEnabled ? "text-[#e87a8c]" : "text-neutral-500"}`} />
-                    </button>
-                  </div>
-
-                  <div className="flex-1 w-full min-w-[200px] order-last sm:order-none relative">
-                    <textarea
-                      value={message}
-                      onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setMessage(e.target.value)}
-                      onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                      placeholder={voiceEnabled ? "Speak naturally or edit your words here..." : "Type a message..."}
-                      rows={1}
-                      disabled={inputDisabled}
-                      className="w-full resize-none bg-black/50 border border-white/[0.06] rounded-xl px-3 py-3 sm:px-4 text-[13px] sm:text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-[#c8324a]/40 transition-all max-h-32 disabled:opacity-60"
-                    />
-                  </div>
-
-                  <motion.button onClick={send} whileTap={{ scale: 0.95 }} disabled={inputDisabled} className="h-10 sm:h-11 px-4 sm:px-5 shrink-0 rounded-xl bg-gradient-to-br from-[#5a0c1c] via-[#8a1a30] to-[#3a0814] border border-[#c8324a]/40 text-neutral-100 flex items-center gap-2 text-[10px] sm:text-xs uppercase tracking-[0.2em] shadow-lg disabled:opacity-60">
-                    <span className="hidden sm:inline">send</span>
-                    <Send className="w-3.5 h-3.5" />
-                  </motion.button>
+            <div className="relative border-t border-white/[0.05] p-2 md:p-4 bg-black/60 backdrop-blur-xl">
+              {selectedFiles.length > 0 && (
+                <div className="flex gap-2 mb-3 overflow-x-auto pb-2 scrollbar-thin">
+                  {selectedFiles.map((file, idx) => (
+                      <div key={idx} className="relative w-16 h-16 shrink-0 rounded-lg border border-white/[0.1] overflow-hidden bg-[#1a1a1a]">
+                        {file.type.startsWith('image/') || file.type.startsWith('video/') ? (
+                            <img src={URL.createObjectURL(file)} className="w-full h-full object-cover opacity-80" alt="preview" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[8px] text-neutral-400 text-center p-1 break-all bg-black/50">{file.name}</div>
+                        )}
+                        <button onClick={() => removeFile(idx)} className="absolute top-1 right-1 w-4 h-4 bg-black/70 rounded-full flex items-center justify-center text-white"><X className="w-3 h-3" /></button>
+                      </div>
+                  ))}
                 </div>
+              )}
+
+              <div className="flex items-end gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
+                <div className="flex gap-2">
+                  <input type="file" accept="image/*,video/*,.gif" multiple onChange={(e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) setSelectedFiles((prev) => [...prev, ...Array.from(e.target.files!)]); if (e.target) e.target.value = ""; }} hidden id="media-input" />
+                  
+                  {/* Media Upload Button */}
+                  <button onClick={() => document.getElementById("media-input")?.click()} className={`w-10 h-10 sm:w-11 sm:h-11 shrink-0 rounded-xl border flex items-center justify-center transition-all ${selectedFiles.length > 0 ? "border-[#c8324a]/50 bg-[#c8324a]/10" : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"}`}>
+                    <ImagePlus className={`w-4 h-4 ${selectedFiles.length > 0 ? "text-[#e87a8c]" : "text-neutral-500"}`} />
+                  </button>
+
+                  {/* Microphone Toggle Button */}
+                  <button 
+                    onClick={toggleRecording} 
+                    className={`w-10 h-10 sm:w-11 sm:h-11 shrink-0 rounded-xl border flex items-center justify-center transition-all ${voiceEnabled ? "border-[#c8324a] bg-[#c8324a]/20 animate-pulse shadow-[0_0_15px_rgba(200,50,74,0.4)] animate-pulse" : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"}`}
+                    title={voiceEnabled ? "Disable Voice Mode" : "Enable Voice Mode"}
+                  >
+                    <Mic className={`w-4 h-4 ${voiceEnabled ? "text-[#e87a8c]" : "text-neutral-500"}`} />
+                  </button>
+                </div>
+
+                <div className="flex-1 w-full min-w-[200px] order-last sm:order-none relative">
+                  <textarea
+                    value={message}
+                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setMessage(e.target.value)}
+                    onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                    placeholder={voiceEnabled ? "Speak naturally or edit your words here..." : "Type a message..."}
+                    rows={1}
+                    disabled={inputDisabled}
+                    className="w-full resize-none bg-black/50 border border-white/[0.06] rounded-xl px-3 py-3 sm:px-4 text-[13px] sm:text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-[#c8324a]/40 transition-all max-h-32 disabled:opacity-60"
+                  />
+                </div>
+
+                <motion.button onClick={send} whileTap={{ scale: 0.95 }} disabled={inputDisabled} className="h-10 sm:h-11 px-4 sm:px-5 shrink-0 rounded-xl bg-gradient-to-br from-[#5a0c1c] via-[#8a1a30] to-[#3a0814] border border-[#c8324a]/40 text-neutral-100 flex items-center gap-2 text-[10px] sm:text-xs uppercase tracking-[0.2em] shadow-lg disabled:opacity-60">
+                  <span className="hidden sm:inline">send</span>
+                  <Send className="w-3.5 h-3.5" />
+                </motion.button>
               </div>
-            )}
+            </div>
           </motion.section>
         </div>
       </div>
