@@ -31,3 +31,4 @@ blackbox_mcp_settings.yml
 personality_dataset.json
 classified_memories.json
 todo.md
+frontend_app/node_modules/

@@ -41,7 +41,7 @@ def generate_selfie(user_description: str):
 
     try:
         # PUT YOUR ACTUAL FILE PATH HERE
-        local_model_path = r"C:\AI\models\realismByStableYogi_sd15V9.safetensors"
+        local_model_path = r"C:\AI\models\realisticVisionV60B1_v51HyperVAE.safetensors"
         
         print("[IMAGE GEN] Loading official CLIP Text Encoder fallback...")
         text_encoder = CLIPTextModel.from_pretrained(
