@@ -1,6 +1,7 @@
 from memory import retrieve_memories
 from prompt_builder import build_messages
 from generation import generate_stream
+from config import HISTORY_WINDOW_SIZE
 
 from state import state, update_state
 from summarizer import update_summary
@@ -40,5 +41,5 @@ while True:
     history.append({"role": "user", "content": user_input})
     history.append({"role": "assistant", "content": response})
 
-    history = history[-12:]
+    history = history[-HISTORY_WINDOW_SIZE:]
 

@@ -1,32 +1,38 @@
 import json
+import torch
 from datasets import Dataset
 from unsloth import FastLanguageModel, PatchDPOTrainer
 from trl import DPOTrainer
 from transformers import TrainingArguments
+from config import (
+    DPO_MODEL_NAME, DPO_MAX_SEQ_LENGTH, DPO_BATCH_SIZE, DPO_GRADIENT_ACCUMULATION_STEPS,
+    DPO_NUM_EPOCHS, DPO_LEARNING_RATE, DPO_BETA, LORA_RANK, LORA_ALPHA, LORA_DROPOUT,
+    OPTIMIZER_TYPE, WARMUP_RATIO, TRAINING_OUTPUT_DIR, LORA_OUTPUT_PATH, PREFERENCES_PATH,
+    ENABLE_GRADIENT_CHECKPOINTING
+)
 
 # 1. Load the Model via Unsloth (Ultra-optimized for 4GB VRAM)
-max_seq_length = 2048 
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name = "unsloth/llama-3-8b-Instruct-bnb-4bit", # Replace with the base model you use
-    max_seq_length = max_seq_length,
+    model_name = DPO_MODEL_NAME,
+    max_seq_length = DPO_MAX_SEQ_LENGTH,
     dtype = None,
     load_in_4bit = True, # CRITICAL for 4GB VRAM
 )
 
-# 2. Add LoRA Adapters (We only train 1% of the model's weights to save VRAM)
+# 2. Add LoRA Adapters (We only train a small percentage of the model's weights to save VRAM)
 model = FastLanguageModel.get_peft_model(
     model,
-    r = 16, 
+    r = LORA_RANK, 
     target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    lora_alpha = 16,
-    lora_dropout = 0,
+    lora_alpha = LORA_ALPHA,
+    lora_dropout = LORA_DROPOUT,
     bias = "none",
-    use_gradient_checkpointing = "unsloth", # CRITICAL for 4GB VRAM
+    use_gradient_checkpointing = "unsloth" if ENABLE_GRADIENT_CHECKPOINTING else False,
 )
 
 # 3. Load Your Local Dataset
 def load_dpo_data():
-    with open("preferences.jsonl", "r", encoding="utf-8") as f:
+    with open(PREFERENCES_PATH, "r", encoding="utf-8") as f:
         data = [json.loads(line) for line in f]
     return Dataset.from_list(data)
 
@@ -40,18 +46,18 @@ trainer = DPOTrainer(
     tokenizer = tokenizer,
     train_dataset = dataset,
     args = TrainingArguments(
-        per_device_train_batch_size = 2,
-        gradient_accumulation_steps = 4, # Simulate larger batch size
-        warmup_ratio = 0.1,
-        num_train_epochs = 3,
-        learning_rate = 5e-6,
+        per_device_train_batch_size = DPO_BATCH_SIZE,
+        gradient_accumulation_steps = DPO_GRADIENT_ACCUMULATION_STEPS,
+        warmup_ratio = WARMUP_RATIO,
+        num_train_epochs = DPO_NUM_EPOCHS,
+        learning_rate = DPO_LEARNING_RATE,
         fp16 = not torch.cuda.is_bf16_supported(),
         bf16 = torch.cuda.is_bf16_supported(),
         logging_steps = 1,
-        optim = "adamw_8bit",
-        output_dir = "outputs",
+        optim = OPTIMIZER_TYPE,
+        output_dir = TRAINING_OUTPUT_DIR,
     ),
-    beta = 0.1, # DPO temperature (how much to penalize the rejected response)
+    beta = DPO_BETA,
 )
 
 # 5. Train and Export
@@ -59,7 +65,7 @@ print("Starting continuous learning loop (DPO)...")
 trainer.train()
 
 # 6. Save the new tuned LoRA adapter
-model.save_pretrained("rosia-dpo-lora")
+model.save_pretrained(LORA_OUTPUT_PATH)
 print("Training complete! New personality weights saved.")
 
 # Note: Afterwards, you can use llama.cpp's export-lora tools to bake these 

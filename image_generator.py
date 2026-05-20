@@ -4,33 +4,27 @@ import gc
 import os
 import tempfile
 import traceback
-from  diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
+from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
 from transformers import CLIPTextModel, CLIPTokenizer
 from compel import Compel
 from transformers import logging as transformers_logging
+from config import (
+    MODEL_PATH, IMAGE_GEN_TIMEOUT, TEMP_IMAGE_DIR, IMAGE_BASE_PROMPT,
+    IMAGE_NEGATIVE_PROMPT, IMAGE_INFERENCE_STEPS, IMAGE_GUIDANCE_SCALE
+)
 
 # Mute the 77-token warning without breaking the tokenizer
 transformers_logging.set_verbosity_error()
 
-TEMP_IMAGE_DIR = os.path.join(tempfile.gettempdir(), "persona_ai_images")
 os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
 
 # OPTIMIZED FOR TOKENS: Shrunk from 45 tokens to ~20 highly-weighted tags
 # Hardcode her exact physical identity here so the LLM doesn't have to remember it
-BASE_PROMPT = (
-    "brown and blonde hair, slim sexy waist, big breasts, big ass, latina skin tone, "
-    "RAW photo, analog style, 8k uhd, dslr, soft volumetric lighting, highly detailed, "
-    "(masterpiece, best quality:1.2), 1girl, solo, 18yo, realistic skin texture, photorealistic"
-)
+BASE_PROMPT = IMAGE_BASE_PROMPT
 
 # Removed "face, head, eyes, portrait, cropped" so the AI is allowed to draw her face and take close-ups
-NEGATIVE_PROMPT = (
-    "(deformed iris, deformed pupils, semi-realistic, cgi, 3d, render, sketch, cartoon, drawing, anime, illustration, painting:1.4), "
-    "text, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, "
-    "mutilated, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, "
-    "bad anatomy, bad proportions, extra limbs, cloned face, disfigured, missing arms, missing legs, long neck"
-)
+NEGATIVE_PROMPT = IMAGE_NEGATIVE_PROMPT
 
 def generate_selfie(user_description: str):
     print("\n[VRAM SWAP] Unloading LLM and mapping Image Gen to GPU...")
@@ -40,11 +34,8 @@ def generate_selfie(user_description: str):
     pipe = None  
 
     try:
-        # Read model path from environment variable or use default
-        local_model_path = os.environ.get(
-            "MODEL_PATH",
-            os.path.expanduser("~/.persona_ai/models/realisticVisionV60B1_v51HyperVAE.safetensors")
-        )
+        # Read model path from config/environment variable or use default
+        local_model_path = MODEL_PATH
         
         # Normalize and expand path
         local_model_path = os.path.abspath(os.path.expanduser(local_model_path))
@@ -74,40 +65,37 @@ def generate_selfie(user_description: str):
             safety_checker=None
         )
         
-        # CRITICAL QUALITY FIX: Swap to DPM++ 2M Karras Scheduler
+        # CRISP HIGH-QUALITY SCHEDULER: Swapped back to DPM++ Multistep for standard checkpoints
         pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, 
-            use_karras_sigmas=True
+            pipe.scheduler.config
         )
         
         pipe.to("cuda")
 
         print("[IMAGE GEN] Compiling embeddings to bypass token limits...")
-
         compel_proc = Compel(
             tokenizer=pipe.tokenizer, 
             text_encoder=pipe.text_encoder,
-            truncate_long_prompts=False # This tells it to stitch chunks together instead of cutting them!
+            truncate_long_prompts=False # Tells it to stitch chunks together instead of cutting them!
         )
 
         final_prompt = f"{user_description}, {BASE_PROMPT}"
-        print(f"[IMAGE GEN] Generating: {user_description}")
+        print(f"[IMAGE GEN] Generating crisp asset: {user_description}")
 
         # 1. Convert text to infinite-length embeddings
         prompt_embeds = compel_proc(final_prompt)
         negative_embeds = compel_proc(NEGATIVE_PROMPT)
         
-        # FIX: Added 's' to pad_conditioning_tensors_to_same_length
         [prompt_embeds, negative_embeds] = compel_proc.pad_conditioning_tensors_to_same_length(
             [prompt_embeds, negative_embeds]
         )
         
-        # 3. Pass the EMBEDDINGS to the pipeline instead of the text
+        # 3. Run high-fidelity inference pass (steps and guidance from config)
         image = pipe(
             prompt_embeds=prompt_embeds,
             negative_prompt_embeds=negative_embeds,
-            num_inference_steps=27, 
-            guidance_scale=7.0,     
+            num_inference_steps=IMAGE_INFERENCE_STEPS,
+            guidance_scale=IMAGE_GUIDANCE_SCALE,
         ).images[0]
 
         filename = f"selfie_{os.urandom(6).hex()}.jpg"
@@ -129,7 +117,6 @@ def generate_selfie(user_description: str):
         if 'text_encoder' in locals():
             del text_encoder
 
-        # Clean up compel processor
         if 'compel_proc' in locals():
             del compel_proc
             

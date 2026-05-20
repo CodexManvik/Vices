@@ -4,6 +4,7 @@ import { Lock, ArrowRight, Loader2 } from "lucide-react";
 
 interface GatekeeperProps {
   onAuthorized: (sessionUrl: string) => void;
+  onRequestAccess?: () => void;
   isDark: boolean;
 }
 
@@ -17,7 +18,7 @@ if (!import.meta.env.DEV && !import.meta.env.VITE_BROKER_URL) {
   console.warn("Warning: VITE_BROKER_URL environment variable not set for production. Using localhost.");
 } 
 
-export function Gatekeeper({ onAuthorized, isDark }: GatekeeperProps) {
+export function Gatekeeper({ onAuthorized, onRequestAccess, isDark }: GatekeeperProps) {
   const [token, setToken] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [telemetry, setTelemetry] = useState(true);
@@ -224,6 +225,30 @@ export function Gatekeeper({ onAuthorized, isDark }: GatekeeperProps) {
                 </motion.span>
               )}
             </AnimatePresence>
+          </button>
+
+          <button
+            onClick={onRequestAccess}
+            className="group relative w-full h-10 flex items-center justify-center overflow-hidden rounded-lg transition-all duration-300"
+            style={{
+              background: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
+              color: isDark ? "#E2E8F0" : "#1C1917",
+              border: isDark
+                ? "1px solid rgba(255,255,255,0.12)"
+                : "1px solid rgba(0,0,0,0.12)",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+              }}
+            >
+              Request Access
+            </span>
           </button>
         </motion.div>
 

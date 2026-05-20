@@ -2,15 +2,16 @@ from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification
 )
+from config import RERANKER_MODEL
 
 import torch
 
 tokenizer = AutoTokenizer.from_pretrained(
-    "BAAI/bge-reranker-base"
+    RERANKER_MODEL
 )
 
 model = AutoModelForSequenceClassification.from_pretrained(
-    "BAAI/bge-reranker-base"
+    RERANKER_MODEL
 )
 
 model.eval()

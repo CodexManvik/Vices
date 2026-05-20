@@ -2,16 +2,19 @@
 import networkx as nx
 import json
 import os
+from config import (
+    GRAPH_DATABASE_PATH, GRAPH_ENTITY_CAREER, GRAPH_ENTITY_FAMILY,
+    GRAPH_ENTITY_LIFESTYLE, GRAPH_MIN_WEIGHT_THRESHOLD
+)
 
-GRAPH_PATH = "lancedb_data/relational_graph.json"
 graph = nx.Graph()
 
 # Initialize base directory structure safely
-os.makedirs(os.path.dirname(GRAPH_PATH), exist_ok=True)
+os.makedirs(os.path.dirname(GRAPH_DATABASE_PATH), exist_ok=True)
 
-if os.path.exists(GRAPH_PATH):
+if os.path.exists(GRAPH_DATABASE_PATH):
     try:
-        with open(GRAPH_PATH, "r", encoding="utf-8") as f:
+        with open(GRAPH_DATABASE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
             graph = nx.node_link_graph(data)
     except Exception:
@@ -27,11 +30,11 @@ def extract_entities_and_update(user_input):
     if not graph.has_node("Rosia"):
         graph.add_node("Rosia", type="core")
 
-    # Dynamic target routing
+    # Dynamic target routing (from config)
     entities = {
-        "career/builder": ["internship", "startup", "code", "agent", "rag", "linux"],
-        "family/legacy": ["father", "cousin", "family", "parents"],
-        "lifestyle": ["bmw", "car", "music", "gaming", "setup"]
+        "career/builder": GRAPH_ENTITY_CAREER,
+        "family/legacy": GRAPH_ENTITY_FAMILY,
+        "lifestyle": GRAPH_ENTITY_LIFESTYLE
     }
 
     for target_node, keywords in entities.items():
@@ -48,7 +51,7 @@ def extract_entities_and_update(user_input):
     # Persist snapshot directly to storage
     try:
         data = nx.node_link_data(graph)
-        with open(GRAPH_PATH, "w", encoding="utf-8") as f:
+        with open(GRAPH_DATABASE_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
@@ -60,7 +63,7 @@ def get_graph_context():
     
     statements = []
     for edge in graph.edges(data=True):
-        if edge[0] == "User" and edge[2].get("weight", 0) > 1:
+        if edge[0] == "User" and edge[2].get("weight", 0) > GRAPH_MIN_WEIGHT_THRESHOLD:
             statements.append(f"User frequently discusses {edge[1]}")
             
     return "; ".join(statements[:3])

@@ -1,12 +1,13 @@
 # prompt_builder.py
 from state import get_mood_description
 from emotion_engine import get_affective_state
+from config import TIMEZONE, BASE_PERSONA_NAME, BASE_PERSONA_AGE, BASE_PERSONA_LOCATION, BASE_PERSONA_VOICE_PLATFORM
 import pytz
 from datetime import datetime
 
-BASE_PERSONA = """
-You are Rosia, an 18-year-old girl living independently in the UK chatting natively on Discord. You are NOT an AI assistant, and you are NOT a narrator.
-You must speak STRICTLY in the first-person perspective of Rosia.
+BASE_PERSONA = f"""
+You are {BASE_PERSONA_NAME}, a {BASE_PERSONA_AGE}-year-old girl living independently in the {BASE_PERSONA_LOCATION} chatting natively on {BASE_PERSONA_VOICE_PLATFORM}. You are NOT an AI assistant, and you are NOT a narrator.
+You must speak STRICTLY in the first-person perspective of {BASE_PERSONA_NAME}.
 You do not have a boyfriend and you are not in a relationship. You are single and available, and you enjoy flirting and teasing in a playful way.
 
 
@@ -40,8 +41,8 @@ To search, output EXACTLY this format and nothing else:
 """
 
 def get_uk_time():
-    uk_tz = pytz.timezone('Europe/London')
-    return datetime.now(uk_tz).strftime("%A, %I:%M %p")
+    tz = pytz.timezone(TIMEZONE)
+    return datetime.now(tz).strftime("%A, %I:%M %p")
 
 def build_messages(user_input, memories, summary, state, history):
     # Base system prompt with new Web Search Protocol

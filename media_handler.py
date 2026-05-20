@@ -5,12 +5,15 @@ import tempfile
 import aiohttp
 import trafilatura
 from urllib.parse import urlparse
+from config import TEMP_IMAGE_DIR, MEDIA_FRAMES_TO_EXTRACT, MEDIA_MAX_TEXT_LENGTH, MEDIA_EXTENSIONS
 
-TEMP_IMAGE_DIR = os.path.join(tempfile.gettempdir(), "persona_ai_images")
 os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
 
-def extract_frames(video_path, num_frames=3):
+def extract_frames(video_path, num_frames=None):
     """Extracts evenly spaced frames from a Video or GIF."""
+    if num_frames is None:
+        num_frames = MEDIA_FRAMES_TO_EXTRACT
+    
     cap = cv2.VideoCapture(video_path)
     frames_paths = []
     
@@ -41,9 +44,7 @@ async def process_url(url):
     parsed = urlparse(url)
     ext = os.path.splitext(parsed.path)[1].lower()
     
-    media_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm']
-    
-    if ext in media_extensions:
+    if ext in MEDIA_EXTENSIONS:
         # It's a direct media link, download it
         try:
             async with aiohttp.ClientSession() as session:
@@ -63,8 +64,8 @@ async def process_url(url):
     if downloaded:
         text = trafilatura.extract(downloaded)
         if text:
-            # Truncate to save VRAM context window
-            truncated_text = " ".join(text.split()[:400]) 
+            # Truncate to save VRAM context window (configurable)
+            truncated_text = " ".join(text.split()[:MEDIA_MAX_TEXT_LENGTH]) 
             return {"type": "text", "content": truncated_text}
             
     return {"type": "unknown"}

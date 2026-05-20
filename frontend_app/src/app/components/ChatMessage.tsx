@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import ReactMarkdown from "react-markdown";
 import * as ContextMenu from "@radix-ui/react-context-menu";
+import React from "react";
 import {
   Copy,
   RefreshCw,
@@ -9,6 +10,7 @@ import {
   Trash2,
   ThumbsDown,
   Check,
+  Maximize2,
 } from "lucide-react";
 
 export interface Message {
@@ -25,15 +27,15 @@ interface ChatMessageProps {
   previousUserPrompt?: string;
   isDark: boolean;
   onRegenerate?: (id: string) => void;
+  onPreviewImage: (url: string) => void;
   onSaveToMemory?: (id: string) => void;
   onDelete?: (id: string) => void;
   onFeedback?: (payload: { messageId: string; prompt: string; response: string }) => void;
 }
 
-// Split Rosia text on *action* segments while still rendering markdown inside dialogue chunks.
 function renderRosiaContent(text: string, isDark: boolean) {
   const cleanedText = text.replace(/\[(TRIGGER_SELFIE|CALL_TOOL)[^\]]*\]?/gi, "");
-  const parts = cleanedText.split(/(\*[^*]+\*)/g).filter(Boolean);
+  const parts = cleanedText.split(/(\\*[^*]+\\*)/g).filter(Boolean);
   return parts.map((part, i) => {
     if (part.startsWith("*") && part.endsWith("*")) {
       return (
@@ -72,25 +74,20 @@ function MarkdownChunk({ text, isDark }: { text: string; isDark: boolean }) {
               color: isDark ? "#E2E8F0" : "#1C1917",
               textDecoration: "underline",
               textUnderlineOffset: "3px",
-              textDecorationColor: isDark
-                ? "rgba(226,232,240,0.4)"
-                : "rgba(28,25,23,0.4)",
+              textDecorationColor: isDark ? "rgba(226,232,240,0.4)" : "rgba(28,25,23,0.4)",
             }}
           >
             {children}
           </a>
         ),
         code: ({ children, className }: any) => {
-          // Fenced code blocks have a language-* className; inline code does not.
           const isBlock = /language-/.test(className ?? "");
           if (isBlock) return <>{children}</>;
           return (
             <code
               style={{
                 background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
-                border: isDark
-                  ? "1px solid rgba(255,255,255,0.06)"
-                  : "1px solid rgba(0,0,0,0.06)",
+                border: isDark ? "1px solid rgba(255,255,255,0.06)" : "1px solid rgba(0,0,0,0.06)",
                 padding: "1px 6px",
                 borderRadius: "4px",
                 fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
@@ -120,11 +117,12 @@ function extractCodeText(node: any): string {
   return "";
 }
 
-// Auto-linkify bare URLs so user-pasted links become anchors.
+// Auto-linkify bare URLs
 function linkifyText(text: string): string {
   return text.replace(/(?<!\]\()(https?:\/\/[^\s)]+)(?![^\[]*\])/g, "[$1]($1)");
 }
 
+// Fixed missing curly bracket from source parsing trace
 function CodeBlock({ code, isDark }: { code: string; isDark: boolean }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -173,6 +171,7 @@ export function ChatMessage({
   previousUserPrompt = "",
   isDark,
   onRegenerate,
+  onPreviewImage,
   onSaveToMemory,
   onDelete,
   onFeedback,
@@ -220,9 +219,7 @@ export function ChatMessage({
                 fontFamily: "'Cormorant Garamond', serif",
                 fontSize: "13px",
                 color: isDark ? "#E2E8F0" : "#1C1917",
-                filter: isDark
-                  ? "drop-shadow(0 0 6px rgba(226,232,240,0.4))"
-                  : "none",
+                filter: isDark ? "drop-shadow(0 0 6px rgba(226,232,240,0.4))" : "none",
                 lineHeight: 1,
               }}
             >
@@ -241,9 +238,7 @@ export function ChatMessage({
               isUser
                 ? {
                     background: isDark ? "#141414" : "#FFFFFF",
-                    border: isDark
-                      ? "1px solid rgba(255,255,255,0.05)"
-                      : "1px solid rgba(0,0,0,0.06)",
+                    border: isDark ? "1px solid rgba(255,255,255,0.05)" : "1px solid rgba(0,0,0,0.06)",
                     color: isDark ? "#E2E8F0" : "#1C1917",
                     borderRadius: "14px",
                     padding: "10px 16px",
@@ -268,18 +263,13 @@ export function ChatMessage({
           </div>
         )}
 
-        {/* Media frame */}
+        {/* Media Frame Anchor with Inspection Overlay Hooks */}
         {(message.image || message.imageLoading) && (
           <div
-            className="mt-3 relative overflow-hidden"
+            className="mt-3 relative overflow-hidden rounded-xl border group/img select-none"
             style={{
-              borderRadius: "12px",
-              border: isDark
-                ? "1px solid rgba(226,232,240,0.15)"
-                : "1px solid rgba(28,25,23,0.1)",
-              boxShadow: isDark
-                ? "0 24px 60px rgba(0,0,0,0.55)"
-                : "0 14px 36px rgba(0,0,0,0.14)",
+              borderColor: isDark ? "rgba(226,232,240,0.15)" : "rgba(28,25,23,0.1)",
+              boxShadow: isDark ? "0 24px 60px rgba(0,0,0,0.55)" : "0 14px 36px rgba(0,0,0,0.14)",
               width: "320px",
               maxWidth: "100%",
             }}
@@ -289,9 +279,7 @@ export function ChatMessage({
                 className="relative w-full"
                 style={{
                   aspectRatio: "4/3",
-                  background: isDark
-                    ? "linear-gradient(135deg, #141414, #0A0A0A)"
-                    : "linear-gradient(135deg, #F5F5F4, #E7E5E4)",
+                  background: isDark ? "linear-gradient(135deg, #141414, #0A0A0A)" : "linear-gradient(135deg, #F5F5F4, #E7E5E4)",
                   overflow: "hidden",
                 }}
               >
@@ -306,23 +294,29 @@ export function ChatMessage({
                   }}
                 />
                 <div className="absolute inset-0 flex flex-col justify-end p-4 gap-2">
-                  <div
-                    className="h-2 w-2/3 rounded"
-                    style={{ background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.06)" }}
-                  />
-                  <div
-                    className="h-2 w-1/2 rounded"
-                    style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)" }}
-                  />
+                  <div className="h-2 w-2/3 rounded" style={{ background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.06)" }} />
+                  <div className="h-2 w-1/2 rounded" style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)" }} />
                 </div>
               </div>
             ) : (
-              <img src={message.image} alt="" className="block w-full h-auto" />
+              <div className="relative w-full h-auto cursor-pointer">
+                <img src={message.image} alt="AI Generated Output" className="block w-full h-auto transition-transform duration-300 group-hover/img:scale-[1.015]" />
+                
+                {/* Custom Overlay Controls */}
+                <div 
+                  onClick={() => onPreviewImage(message.image!)}
+                  className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity duration-200"
+                >
+                  <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 shadow-lg">
+                    <Maximize2 className="w-3 text-cyan-400" />
+                    <span className="text-[10px] text-white font-mono uppercase tracking-wider">Inspect Canvas</span>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
 
-        {/* Footer row for AI: timestamp + silent feedback */}
         {!isUser && message.text && (
           <div className="mt-2 flex items-center gap-2 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
@@ -340,9 +334,7 @@ export function ChatMessage({
                 downvoted
                   ? {
                       color: isDark ? "#E2E8F0" : "#1C1917",
-                      filter: isDark
-                        ? "drop-shadow(0 0 6px rgba(226,232,240,0.6))"
-                        : "drop-shadow(0 0 4px rgba(28,25,23,0.3))",
+                      filter: isDark ? "drop-shadow(0 0 6px rgba(226,232,240,0.6))" : "drop-shadow(0 0 4px rgba(28,25,23,0.3))",
                     }
                   : {
                       color: isDark ? "#52525B" : "#A8A29E",
@@ -374,7 +366,6 @@ export function ChatMessage({
     </motion.div>
   );
 
-  // Wrap AI messages with right-click context menu
   if (isUser) return messageBody;
 
   return (
@@ -387,9 +378,7 @@ export function ChatMessage({
             background: isDark ? "rgba(20,20,20,0.92)" : "rgba(255,255,255,0.95)",
             backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
-            border: isDark
-              ? "1px solid rgba(255,255,255,0.08)"
-              : "1px solid rgba(0,0,0,0.08)",
+            border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.08)",
             boxShadow: "0 20px 50px rgba(0,0,0,0.4)",
           }}
         >
@@ -443,9 +432,7 @@ function MenuItem({
       style={{
         fontFamily: "'Inter', sans-serif",
         fontSize: "12.5px",
-        color: destructive
-          ? "#F87171"
-          : isDark ? "#E2E8F0" : "#1C1917",
+        color: destructive ? "#F87171" : isDark ? "#E2E8F0" : "#1C1917",
       }}
     >
       <span style={{ opacity: 0.75 }}>{icon}</span>
@@ -455,7 +442,6 @@ function MenuItem({
 }
 
 function UserText({ text, isDark }: { text: string; isDark: boolean }) {
-  // Auto-linkify in user pills too
   const parts = text.split(/(https?:\/\/[^\s]+)/g);
   return (
     <>

@@ -9,24 +9,22 @@ interface ChatViewProps {
   mood: string;
   tone: string;
   sessionUrl: string | null;
+  onImageInspectTrigger: (url: string) => void;
 }
 
 function nowTime() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
-  // Start with a completely clean slate (no hardcoded messages)
+export function ChatView({ isDark, mood, tone, sessionUrl, onImageInspectTrigger }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [typing, setTyping] = useState(false);
   const messageIdRef = useRef<number>(Date.now());
 
-  // Scroll tracking state
   const feedRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Auto-scroll logic
   const scrollToBottom = (smooth = true) => {
     if (feedRef.current) {
       feedRef.current.scrollTo({
@@ -41,7 +39,6 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
       scrollToBottom(true);
       setPendingCount(0);
     } else if (typing) {
-      // Only increment pending count if the AI is generating and we are scrolled up
       setPendingCount((p: number) => p + 1);
     }
   }, [messages, typing, atBottom]);
@@ -49,13 +46,11 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
   const handleScroll = () => {
     if (!feedRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = feedRef.current;
-    // Check if we are within 100px of the bottom
     const isBottom = scrollHeight - scrollTop - clientHeight < 100;
     setAtBottom(isBottom);
     if (isBottom) setPendingCount(0);
   };
 
-  // --- CORE STREAMING LOGIC ---
   const handleSend = async (text: string, image?: { url: string; name: string }, voice?: boolean) => {
     if (!sessionUrl || typing) return;
     if (!text.trim() && (!image)) return;
@@ -63,7 +58,6 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
     const id = (messageIdRef.current++).toString();
     const assistantId = (messageIdRef.current++).toString();
 
-    // Optimistically push the user's message to the UI immediately
     const newMsg: Message = {
       id,
       role: "user",
@@ -82,7 +76,6 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
     scrollToBottom(true);
 
     try {
-      // Build standard FormData for the FastAPI backend
       const fd = new FormData();
       fd.append("user_input", text);
       fd.append("target_model", "default");
@@ -107,7 +100,6 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
       const processChunk = (rawText: string) => {
         let cleanText = rawText;
         
-        // Parse incoming image triggers seamlessly
         const attachmentRegex = /\[SYSTEM_MEDIA_ATTACHMENT:\s*(file:\/\/[^\]]+)\]/g;
         let match;
         while ((match = attachmentRegex.exec(cleanText)) !== null) {
@@ -132,7 +124,6 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
         done = doneReading;
         if (value) {
           const chunk = decoder.decode(value, { stream: true });
-          // Split SSE lines
           const lines = chunk
             .split(/\r?\n/)
             .map((l) => l.trimEnd())
@@ -158,16 +149,13 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
     }
   };
 
-  // --- SILENT DPO TELEMETRY LOGIC ---
   const handleFeedback = (payload: { messageId: string; prompt: string; response: string }) => {
     if (!sessionUrl) return;
     
-    // Find the specific user prompt that caused this bad response
     const idx = messages.findIndex((m: Message) => m.id === payload.messageId);
     const originalPrompt = messages.slice(0, idx).reverse().find((m: Message) => m.role === "user")?.text || "Unknown Context";
 
     try {
-      // Fire and forget (No awaits, no UI freezing)
       fetch(`${sessionUrl}/feedback`, {
         method: "POST",
         headers: {
@@ -177,7 +165,7 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
         body: JSON.stringify({
           user_input: originalPrompt,
           rejected_response: payload.response,
-          chosen_response: "", // Leaves it blank for your dataset
+          chosen_response: "",
         }),
       });
     } catch (e) {
@@ -187,68 +175,31 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
 
   return (
     <div className="flex-1 flex flex-col relative min-w-0 h-full">
-      {/* Top Header */}
       <header
         className="h-16 shrink-0 flex flex-col justify-center px-8 z-10"
         style={{
-          borderBottom: isDark
-            ? "1px solid rgba(255,255,255,0.04)"
-            : "1px solid rgba(0,0,0,0.04)",
+          borderBottom: isDark ? "1px solid rgba(255,255,255,0.04)" : "1px solid rgba(0,0,0,0.04)",
         }}
       >
-        <h2
-          style={{
-            fontFamily: "'Cormorant Garamond', serif",
-            fontSize: "20px",
-            color: isDark ? "#E2E8F0" : "#1C1917",
-            letterSpacing: "0.02em",
-          }}
-        >
+        <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", color: isDark ? "#E2E8F0" : "#1C1917", letterSpacing: "0.02em" }}>
           Whispers in the Dark
         </h2>
-        <p
-          style={{
-            fontFamily: "'Inter', sans-serif",
-            fontSize: "10px",
-            color: isDark ? "#71717A" : "#A8A29E",
-            letterSpacing: "0.05em",
-            marginTop: "2px",
-          }}
-        >
+        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: "10px", color: isDark ? "#71717A" : "#A8A29E", letterSpacing: "0.05em", marginTop: "2px" }}>
           Status: <span className="capitalize">{mood} / {tone}</span>
         </p>
       </header>
 
-      {/* Masked Void Scroll Feed */}
-      <div
-        className="flex-1 overflow-y-auto px-6 md:px-10 pt-6 pb-32 space-y-7 mask-void-scroll scrollbar-hide relative z-0"
-        ref={feedRef}
-        onScroll={handleScroll}
-      >
+      <div className="flex-1 overflow-y-auto px-6 md:px-10 pt-6 pb-32 space-y-7 mask-void-scroll scrollbar-hide relative z-0" ref={feedRef} onScroll={handleScroll}>
         <AnimatePresence initial={false}>
           {messages.map((m) => (
-            <motion.div
-              key={m.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-            >
-              <ChatMessage
-                message={m}
-                isDark={isDark}
-                onFeedback={handleFeedback}
-              />
+            <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
+              <ChatMessage message={m} isDark={isDark} onFeedback={handleFeedback} onPreviewImage={onImageInspectTrigger} />
             </motion.div>
           ))}
         </AnimatePresence>
 
-        {/* Typing indicator */}
         {typing && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex justify-start pl-2"
-          >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start pl-2">
             <div className="flex items-center gap-1.5 py-3">
               {[0, 1, 2].map((i) => (
                 <motion.div
@@ -264,14 +215,10 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
         )}
       </div>
 
-      {/* Return to present FAB */}
       <AnimatePresence>
         {!atBottom && pendingCount > 0 && (
           <motion.button
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            onClick={() => scrollToBottom(true)}
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} onClick={() => scrollToBottom(true)}
             className="absolute left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full shadow-2xl"
             style={{
               bottom: "110px",
@@ -289,13 +236,8 @@ export function ChatView({ isDark, mood, tone, sessionUrl }: ChatViewProps) {
         )}
       </AnimatePresence>
 
-      {/* Input Dock */}
       <div className="absolute bottom-8 left-6 right-6 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-[680px] z-50">
-        <CommandBar
-          isDark={isDark}
-          onSend={(text, image, voice) => handleSend(text, image, voice)}
-          disabled={typing || !sessionUrl}
-        />
+        <CommandBar isDark={isDark} onSend={(text, image, voice) => handleSend(text, image, voice)} disabled={typing || !sessionUrl} />
       </div>
     </div>
   );

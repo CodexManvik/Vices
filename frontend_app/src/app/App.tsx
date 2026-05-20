@@ -3,19 +3,22 @@ import { AnimatePresence, motion } from "motion/react";
 import { Gatekeeper } from "./components/Gatekeeper";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./components/ChatView";
-import { WindowChrome } from "./components/WindowChrome";
+import { AccessRequest } from "./components/AccessRequest";
+import { AdminDashboard } from "./components/AdminDashboard";
 import { MoodGlow } from "./components/MoodGlow";
+import ImageInspectWindow from "./components/ImageInspectWindow";
 
 export default function App() {
   const [authorized, setAuthorized] = useState(false);
+  const [showAccessRequest, setShowAccessRequest] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(true);
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
 
-  // Real status state
   const [status, setStatus] = useState({ chemistry: 50, mood: "neutral", tone: "casual" });
 
-  // Poll the backend for live emotional status
   useEffect(() => {
     if (!sessionUrl) return;
 
@@ -37,14 +40,12 @@ export default function App() {
       }
     };
 
-    // Fetch immediately, then every 10 seconds
     fetchStatus();
     const id = setInterval(fetchStatus, 10000);
     
     return () => clearInterval(id);
   }, [sessionUrl]);
 
-  // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (authTimeoutRef.current) {
@@ -53,13 +54,24 @@ export default function App() {
     };
   }, []);
 
+  // Admin panel toggle with keyboard shortcut (Ctrl+Shift+M)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === "M") {
+        e.preventDefault();
+        setShowAdminPanel((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const handleAuthorized = (url: string) => {
     setSessionUrl(url);
-    // Clear any existing timeout first
     if (authTimeoutRef.current) {
       clearTimeout(authTimeoutRef.current);
     }
-    // Smooth delay before dropping the lock screen for dramatic effect
     authTimeoutRef.current = setTimeout(() => setAuthorized(true), 600);
   };
 
@@ -72,46 +84,36 @@ export default function App() {
         fontFamily: "'Inter', sans-serif",
       }}
     >
-      {/* Ambient mood tint behind everything */}
       <MoodGlow mood={status.mood} isDark={isDark} />
-
-      {/* Native frameless window chrome */}
-      <WindowChrome isDark={isDark} />
 
       <div className="flex-1 relative min-h-0">
         <AnimatePresence mode="wait">
-          {!authorized ? (
-            <motion.div
-              key="gate"
-              exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }}
-              transition={{ duration: 0.6 }}
-              className="w-full h-full"
-            >
-              <Gatekeeper onAuthorized={handleAuthorized} isDark={isDark} />
+          {showAdminPanel ? (
+            <motion.div key="admin" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
+              <AdminDashboard isDark={isDark} onBack={() => setShowAdminPanel(false)} />
             </motion.div>
+          ) : !authorized ? (
+            showAccessRequest ? (
+              <motion.div key="access-request" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
+                <AccessRequest isDark={isDark} onBack={() => setShowAccessRequest(false)} />
+              </motion.div>
+            ) : (
+              <motion.div key="gate" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
+                <Gatekeeper onAuthorized={handleAuthorized} onRequestAccess={() => setShowAccessRequest(true)} isDark={isDark} />
+              </motion.div>
+            )
           ) : (
-            <motion.div
-              key="app"
-              initial={{ opacity: 0, scale: 1.01 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.7, ease: "easeOut" }}
-              className="w-full h-full flex"
-            >
-              <Sidebar
-                isDark={isDark}
-                toggleTheme={() => setIsDark((v) => !v)}
-                chemistry={status.chemistry}
-                mood={status.mood}
-              />
-              <ChatView
-                isDark={isDark}
-                mood={status.mood}
-                tone={status.tone}
-                sessionUrl={sessionUrl}
-              />
+            <motion.div key="app" initial={{ opacity: 0, scale: 1.01 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.7, ease: "easeOut" }} className="w-full h-full flex">
+              <Sidebar isDark={isDark} toggleTheme={() => setIsDark((v) => !v)} chemistry={status.chemistry} mood={status.mood} />
+              <ChatView isDark={isDark} mood={status.mood} tone={status.tone} sessionUrl={sessionUrl} onImageInspectTrigger={(url) => setActivePreviewImage(url)} />
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Floating Sub Window Inspection Canvas Overlay */}
+        {activePreviewImage && (
+          <ImageInspectWindow imageUrl={activePreviewImage} onClose={() => setActivePreviewImage(null)} />
+        )}
       </div>
     </div>
   );

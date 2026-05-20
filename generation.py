@@ -3,9 +3,9 @@ import requests
 import json
 import re
 from rich.console import Console
+from config import LLAMA_BASE_URL, LLAMA_TIMEOUT, GENERATION_TEMPERATURE, GENERATION_TOP_P, GENERATION_FREQUENCY_PENALTY, GENERATION_PRESENCE_PENALTY
 
 console = Console()
-LLAMA_BASE_URL = "http://127.0.0.1:8080/v1"
 
 def get_available_models():
     """Queries the local llama.cpp server for loaded/available models."""
@@ -49,10 +49,10 @@ def generate_stream(messages, target_model="default"):
     
     payload = {
         "messages": messages,
-        "temperature": 0.85,
-        "top_p": 0.9,
-        "frequency_penalty": 0.1,
-        "presence_penalty": 0.1,
+        "temperature": GENERATION_TEMPERATURE,
+        "top_p": GENERATION_TOP_P,
+        "frequency_penalty": GENERATION_FREQUENCY_PENALTY,
+        "presence_penalty": GENERATION_PRESENCE_PENALTY,
         "stream": True
     }
 
@@ -65,7 +65,7 @@ def generate_stream(messages, target_model="default"):
             f"{LLAMA_BASE_URL}/chat/completions",
             json=payload,
             stream=True,
-            timeout=120
+            timeout=LLAMA_TIMEOUT
         )
 
         if response.status_code != 200:

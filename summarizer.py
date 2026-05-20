@@ -1,3 +1,5 @@
+from config import SUMMARY_MESSAGE_WINDOW
+
 conversation_summary = ""
 
 
@@ -5,7 +7,7 @@ def update_summary(history):
 
     global conversation_summary
 
-    last_messages = history[-8:]
+    last_messages = history[-SUMMARY_MESSAGE_WINDOW:]
 
     summary = []
 

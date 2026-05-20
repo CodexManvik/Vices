@@ -1,54 +1,104 @@
-import lancedb
-from sentence_transformers import SentenceTransformer
-from reranker import rerank
+import os
+import json
 import re
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from turbovec import IdMapIndex
+from reranker import rerank
+from config import (
+    TV_INDEX_PATH, METADATA_PATH, EMBEDDING_MODEL, RETRIEVAL_INITIAL_K,
+    RETRIEVAL_MAX_EXPLICIT_DOCS, RETRIEVAL_FINAL_RETURN_COUNT,
+    EXPLICIT_WORDS, ENABLE_CONTENT_GUARDRAILS, NORMALIZE_SLANG
+)
 
-DB_PATH = "lancedb_data"
-db = lancedb.connect(DB_PATH)
-table = db.open_table("memory")
-model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+# --- SYSTEM CONFIGURATION ---
+# Note: These are now loaded from config.py via environment variables
 
-def retrieve_memories(query):
-    embedding = model.encode(query).tolist()
+# Move text normalization out into a maintainable data structure
+SLANG_MAP = {
+    r'\b2\b': 'to',
+    r'\b4\b': 'for',
+    r'\bu\b': 'you',
+    r'\br\b': 'are',
+    r'\bur\b': 'your',
+    r'\bn\b': 'and'
+}
 
-    results = (
-        table.search(embedding)
-        .limit(8)
-        .to_list()
-    )
+RETRIEVAL_PARAMS = {
+    "initial_k": RETRIEVAL_INITIAL_K,
+    "max_explicit_docs": RETRIEVAL_MAX_EXPLICIT_DOCS,
+    "final_return_count": RETRIEVAL_FINAL_RETURN_COUNT
+}
 
-    # 1. Extract raw text and rerank
-    docs = [r["raw_text"] for r in results]
-    docs = rerank(query, docs)
+# --- ENGINE INITIALIZATION ---
+print("[RETRIEVAL ENGINE] Initializing embedding models...")
+model = SentenceTransformer(EMBEDDING_MODEL)
 
-    # 2. Clean slangs and shorthand
-    cleaned_docs = []
-    for doc in docs:
-        # Safely replace shorthand using explicit word boundaries
-        d = re.sub(r'\b2\b', 'to', doc)
-        d = re.sub(r'\b4\b', 'for', d)
-        d = re.sub(r'\bu\b', 'you', d, flags=re.IGNORECASE)
-        d = re.sub(r'\br\b', 'are', d, flags=re.IGNORECASE)
-        d = re.sub(r'\bur\b', 'your', d, flags=re.IGNORECASE)
-        d = re.sub(r'\bn\b', 'and', d, flags=re.IGNORECASE)
-        cleaned_docs.append(d)
+if os.path.exists(TV_INDEX_PATH) and os.path.exists(METADATA_PATH):
+    index = IdMapIndex.load(TV_INDEX_PATH)
+    with open(METADATA_PATH, "r", encoding="utf-8") as f:
+        metadata_lookup = json.load(f)
+    print("[RETRIEVAL ENGINE] Loaded Turbovec Index and lookup maps.")
+else:
+    index = None
+    metadata_lookup = {}
+    print("[WARNING] Vector database matching keys not found! Run build_memory_db.py.")
 
-    # 3. Filter for explicit content frequency
-    # We allow at most ONE explicit style example to avoid overwhelming the prompt
+
+# --- CORE LOGIC ---
+def clean_text_shorthand(text: str) -> str:
+    """Standardizes chat slang using the dynamic lookup map configuration."""
+    if not NORMALIZE_SLANG:
+        return text
+    
+    for pattern, replacement in SLANG_MAP.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def enforce_content_guardrails(docs: list) -> list:
+    """Clamps explicit examples based on configured volume limits."""
+    if not ENABLE_CONTENT_GUARDRAILS:
+        return docs
+    
     filtered = []
-    sexual_count = 0
-    sexual_words = ["cum", "cock", "pussy", "fuck", "daddy"]
-
-    for doc in cleaned_docs:
-        has_sexual_word = any(w in doc.lower() for w in sexual_words)
+    explicit_count = 0
+    
+    for doc in docs:
+        is_explicit = any(word in doc.lower() for word in EXPLICIT_WORDS)
         
-        if has_sexual_word:
-            sexual_count += 1
-            # If we already have one explicit example, skip this one
-            if sexual_count > 1:
+        if is_explicit:
+            explicit_count += 1
+            if explicit_count > RETRIEVAL_PARAMS["max_explicit_docs"]:
                 continue
-        
+                
         filtered.append(doc)
+    return filtered
 
-    # Return top 3 processed examples
-    return filtered[:3]
+
+def retrieve_memories(query: str):
+    if index is None or not metadata_lookup:
+        return []
+
+    # 1. Vector query structure generation
+    query_vector = model.encode(query).astype(np.float32).reshape(1, -1)
+    
+    # 2. Hardware accelerated 4-bit retrieval pass
+    _, retrieved_ids = index.search(query_vector, k=RETRIEVAL_PARAMS["initial_k"])
+    
+    docs = [
+        metadata_lookup[str(uid)]["raw_text"] 
+        for uid in retrieved_ids[0] 
+        if str(uid) in metadata_lookup
+    ]
+
+    if not docs:
+        return []
+
+    # 3. Execution of Rerank, Sanitization, and Guardrail pipelines
+    reranked_docs = rerank(query, docs)
+    cleaned_docs = [clean_text_shorthand(doc) for doc in reranked_docs]
+    safeguarded_docs = enforce_content_guardrails(cleaned_docs)
+
+    # 4. Final context return slice boundary slice
+    return safeguarded_docs[:RETRIEVAL_PARAMS["final_return_count"]]
