@@ -22,7 +22,7 @@ from socket import gethostbyname, gethostname
 from config import (
     CORS_ALLOW_ORIGINS, CORS_ALLOW_METHODS, CORS_ALLOW_HEADERS, VIDEO_RECORDING_MODE,
     CURRENT_RUNTIME_TUNNEL, WEB_SEARCH_MAX_RESULTS,
-    TEMP_IMAGE_DIR, ADMIN_PASSWORD, REQUEST_STORAGE_PATH, APPROVED_TOKENS_PATH
+    TEMP_IMAGE_DIR, ADMIN_PASSWORD, REQUEST_STORAGE_PATH, APPROVED_TOKENS_PATH, MASTER_TOKEN
 )
 
 # --- VOICE INTEGRATION ---
@@ -53,13 +53,14 @@ chat_lock = asyncio.Lock()
 console = Console()
 last_interaction_time = datetime.now()
 chronos_queue = asyncio.Queue()
+allow_creds = False if "*" in CORS_ALLOW_ORIGINS else True
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGINS,
     allow_methods=CORS_ALLOW_METHODS,
     allow_headers=CORS_ALLOW_HEADERS,
-    allow_credentials=True,
+    allow_credentials=allow_creds,
 )
 
 app.mount("/images", StaticFiles(directory=TEMP_IMAGE_DIR), name="images")
@@ -202,6 +203,11 @@ def get_client_ip(x_forwarded_for: Optional[str] = None) -> str:
 
 def is_valid_token(token: str) -> bool:
     """Check token exists in request_storage and is approved."""
+    # 1. Developer Bypass
+    if token == MASTER_TOKEN:
+        return True
+        
+    # 2. Standard User Check
     return any(
         req.get("token") == token and req.get("status") == "approved"
         for req in request_storage.requests.values()
@@ -219,17 +225,44 @@ broker_app.add_middleware(
     allow_origins=CORS_ALLOW_ORIGINS,
     allow_methods=CORS_ALLOW_METHODS,
     allow_headers=CORS_ALLOW_HEADERS,
-    allow_credentials=True,
+    allow_credentials=allow_creds,
 )
+
+
+@broker_app.get("/health")
+async def broker_health():
+    """Health check endpoint - allows clients to verify broker is reachable."""
+    return {
+        "status": "healthy",
+        "message": "Broker is online and accepting connections",
+        "broker_port": 9000,
+        "api_endpoint": CURRENT_RUNTIME_TUNNEL
+    }
+
+
+@broker_app.options("/health")
+async def broker_health_options():
+    """Handle preflight requests for health endpoint."""
+    return {"ok": True}
 
 
 @broker_app.post("/request-access")
 async def handle_access_request(x_tester_token: str = Header(None)):
     if not x_tester_token:
-        raise HTTPException(status_code=403, detail="No token provided.")
+        raise HTTPException(
+            status_code=403, 
+            detail="No token provided. Submit an access request first using /request-waitlist."
+        )
     if not is_valid_token(x_tester_token):
-        raise HTTPException(status_code=403, detail="Invalid or unrecognized token.")
-    return {"status": "allocated", "session_url": CURRENT_RUNTIME_TUNNEL}
+        raise HTTPException(
+            status_code=403, 
+            detail="Invalid or unrecognized token. Ensure it's approved by the admin."
+        )
+    return {
+        "status": "allocated", 
+        "session_url": CURRENT_RUNTIME_TUNNEL,
+        "message": "Access granted. Use the session_url to connect to the API."
+    }
 
 
 @broker_app.post("/request-waitlist")
@@ -646,6 +679,7 @@ async def chat(
     x_tester_token: str = Header(None),
 ):
     global last_interaction_time
+    
     last_interaction_time = datetime.now()
 
     # Resolve per-session history

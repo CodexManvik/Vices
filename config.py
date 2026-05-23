@@ -215,6 +215,7 @@ TAURI_APP_IDENTIFIER = os.getenv("TAURI_APP_IDENTIFIER", "com.persona.ai.vices")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 if not ADMIN_PASSWORD:
     raise RuntimeError("ADMIN_PASSWORD environment variable is not set. Refusing to start.")
+MASTER_TOKEN = os.getenv("MASTER_TOKEN") # <-- Add this line
 ADMIN_TOKEN_SECRET = os.getenv("ADMIN_TOKEN_SECRET", "your-secret-key-change-in-production")
 REQUEST_STORAGE_PATH = os.getenv("REQUEST_STORAGE_PATH", "access_requests.json")
 APPROVED_TOKENS_PATH = os.getenv("APPROVED_TOKENS_PATH", "approved_tokens.json")

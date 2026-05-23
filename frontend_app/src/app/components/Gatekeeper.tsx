@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Lock, ArrowRight, Loader2 } from "lucide-react";
+import { Lock, ArrowRight, Loader2, CheckCircle2, AlertCircle, Wifi } from "lucide-react";
 
 interface GatekeeperProps {
   onAuthorized: (sessionUrl: string) => void;
@@ -10,30 +10,106 @@ interface GatekeeperProps {
 }
 
 type Status = "idle" | "pinging" | "denied";
+type UrlStatus = "checking" | "reachable" | "unreachable" | "idle";
 
 export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDark }: GatekeeperProps) {
   const [token, setToken] = useState("");
   const [brokerUrl, setBrokerUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
+  const [urlStatus, setUrlStatus] = useState<UrlStatus>("idle");
+  const [urlMessage, setUrlMessage] = useState("");
   const [telemetry, setTelemetry] = useState(true);
   const [showBrokerInput, setShowBrokerInput] = useState(true);
 
+  // Real-time URL validation
+  useEffect(() => {
+    const validateUrl = async () => {
+      if (!brokerUrl.trim()) {
+        setUrlStatus("idle");
+        setUrlMessage("");
+        return;
+      }
+
+      setUrlStatus("checking");
+      setUrlMessage("Checking broker connection...");
+
+      try {
+        // Ensure URL has https:// prefix if no scheme provided
+        let cleanUrl = brokerUrl.trim();
+        if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+          cleanUrl = `https://${cleanUrl}`;
+        }
+        cleanUrl = cleanUrl.replace(/\/+$/, "");
+        
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        const res = await fetch(`${cleanUrl}/health`, {
+          method: "GET",
+          mode: "cors",
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (res.ok) {
+          const data = await res.json();
+          setUrlStatus("reachable");
+          setUrlMessage(`✓ Broker online (API: ${data.api_endpoint})`);
+        } else {
+          setUrlStatus("unreachable");
+          setUrlMessage(`✗ Broker returned error: ${res.status}`);
+        }
+      } catch (e: any) {
+        setUrlStatus("unreachable");
+        console.error("Health check error:", e);
+        console.error("Error details:", {
+          name: e.name,
+          message: e.message,
+          url: `${cleanUrl}/health`
+        });
+        if (e.name === "AbortError") {
+          setUrlMessage("✗ Broker not responding (timeout). Check URL and network.");
+        } else if (e instanceof TypeError) {
+          setUrlMessage("✗ Network error. Verify Cloudflare tunnel is running.");
+        } else {
+          setUrlMessage(`✗ Cannot reach broker (${e.message || "unknown error"})`);
+        }
+      }
+    };
+
+    const timer = setTimeout(validateUrl, 800);
+    return () => clearTimeout(timer);
+  }, [brokerUrl]);
+
   const handleConnect = async () => {
     if (!token.trim() || !brokerUrl.trim()) return;
+    if (urlStatus !== "reachable") {
+      setStatus("denied");
+      setTimeout(() => setStatus("idle"), 2500);
+      return;
+    }
+
     setStatus("pinging");
-    
+
     try {
-      // Use the user-provided broker URL instead of hardcoded
-      const res = await fetch(`${brokerUrl.replace(/\/$/, '')}/request-access`, {
+      // Ensure URL has https:// prefix if no scheme provided
+      let cleanUrl = brokerUrl.trim();
+      if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+        cleanUrl = `https://${cleanUrl}`;
+      }
+      cleanUrl = cleanUrl.replace(/\/+$/, "");
+
+      const res = await fetch(`${cleanUrl}/request-access`, {
         method: "POST",
-        headers: { 
+        headers: {
           "x-tester-token": token,
           "ngrok-skip-browser-warning": "bypass"
         }
       });
-      
+
       const data = await res.json();
-      
+
       if (data.status === "allocated" && data.session_url) {
         const url = data.session_url.replace(/\/+$/, "").trim();
         if (url) {
@@ -70,7 +146,7 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
           }}
         />
 
-        <div className="relative z-10 w-full max-w-[340px] px-6 flex flex-col items-center">
+        <div className="relative z-10 w-full max-w-[380px] px-6 flex flex-col items-center">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -139,19 +215,66 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
                 className="w-full h-11 px-4 outline-none transition-all duration-300"
                 style={{
                   background: isDark ? "#141414" : "#FFFFFF",
-                  border: isDark
-                    ? "1px solid rgba(255,255,255,0.08)"
-                    : "1px solid rgba(0,0,0,0.08)",
+                  border:
+                    urlStatus === "reachable"
+                      ? "2px solid rgba(34,197,94,0.5)"
+                      : urlStatus === "unreachable"
+                      ? "2px solid rgba(239,68,68,0.5)"
+                      : isDark
+                      ? "1px solid rgba(255,255,255,0.08)"
+                      : "1px solid rgba(0,0,0,0.08)",
                   borderRadius: "12px",
                   fontFamily: "'Inter', sans-serif",
                   fontSize: "13px",
                   color: isDark ? "#E2E8F0" : "#1C1917",
                 }}
               />
+              {brokerUrl.trim() && (
+                <div
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+                  style={{
+                    background:
+                      urlStatus === "reachable"
+                        ? isDark
+                          ? "rgba(34,197,94,0.1)"
+                          : "rgba(34,197,94,0.08)"
+                        : urlStatus === "unreachable"
+                        ? isDark
+                          ? "rgba(239,68,68,0.1)"
+                          : "rgba(239,68,68,0.08)"
+                        : isDark
+                        ? "rgba(226,232,240,0.05)"
+                        : "rgba(0,0,0,0.05)",
+                  }}
+                >
+                  {urlStatus === "checking" && (
+                    <>
+                      <Loader2 size={14} className="animate-spin" style={{ color: isDark ? "#A1A1AA" : "#52525B" }} />
+                      <span style={{ color: isDark ? "#A1A1AA" : "#52525B" }}>{urlMessage}</span>
+                    </>
+                  )}
+                  {urlStatus === "reachable" && (
+                    <>
+                      <CheckCircle2 size={14} style={{ color: "#22c55e" }} />
+                      <span style={{ color: "#22c55e" }}>{urlMessage}</span>
+                    </>
+                  )}
+                  {urlStatus === "unreachable" && (
+                    <>
+                      <AlertCircle size={14} style={{ color: "#ef4444" }} />
+                      <span style={{ color: "#ef4444" }}>{urlMessage}</span>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             <button
               onClick={() => {
+                if (urlStatus !== "reachable") {
+                  alert("Please enter a valid and reachable broker URL first.");
+                  return;
+                }
                 onBrokerUrlSet(brokerUrl);
                 setShowBrokerInput(false);
               }}
@@ -162,8 +285,9 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
                 boxShadow: isDark
                   ? "0 0 20px rgba(226,232,240,0.15)"
                   : "0 4px 12px rgba(0,0,0,0.1)",
+                opacity: urlStatus === "reachable" ? 1 : 0.5,
               }}
-              disabled={!brokerUrl.trim()}
+              disabled={!brokerUrl.trim() || urlStatus !== "reachable"}
             >
               <span
                 style={{
@@ -187,7 +311,7 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
                 textAlign: "center",
               }}
             >
-              Ask the host for their broker tunnel URL (looks like https://xxx.trycloudflare.com)
+              Ask the host for their broker tunnel URL (looks like https://xxx.trycloudflare.com). It will be verified automatically.
             </p>
           </motion.div>
         </div>
@@ -260,6 +384,27 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
           transition={{ duration: 0.8, delay: 0.1, ease: "easeOut" }}
           className="w-full flex flex-col gap-3"
         >
+          <div
+            className="px-3 py-2 rounded-lg text-xs flex items-center justify-between"
+            style={{
+              background: isDark ? "rgba(30,41,59,0.5)" : "rgba(241,245,249,0.5)",
+              border: isDark
+                ? "1px solid rgba(148,163,184,0.15)"
+                : "1px solid rgba(100,116,139,0.15)",
+            }}
+          >
+            <span style={{ color: isDark ? "#94a3b8" : "#64748b", fontSize: "10px" }}>
+              Broker: {brokerUrl.length > 30 ? brokerUrl.substring(0, 27) + "..." : brokerUrl}
+            </span>
+            <div className="flex items-center gap-1">
+              {urlStatus === "checking" && (
+                <Loader2 size={12} className="animate-spin" style={{ color: isDark ? "#94a3b8" : "#64748b" }} />
+              )}
+              {urlStatus === "reachable" && <CheckCircle2 size={12} style={{ color: "#22c55e" }} />}
+              {urlStatus === "unreachable" && <AlertCircle size={12} style={{ color: "#ef4444" }} />}
+            </div>
+          </div>
+
           <input
             type="text"
             value={token}
@@ -338,21 +483,39 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
                 </motion.span>
               )}
               {status === "denied" && (
-                <motion.span
+                <motion.div
                   key="denied"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  style={{
-                    fontFamily: "'Inter', sans-serif",
-                    fontSize: "10px",
-                    fontWeight: 600,
-                    letterSpacing: "0.15em",
-                    color: isDark ? "#EF4444" : "#DC2626",
-                  }}
+                  className="flex flex-col items-center gap-2 w-full"
                 >
-                  Access Denied
-                </motion.span>
+                  <span
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: "10px",
+                      fontWeight: 600,
+                      letterSpacing: "0.15em",
+                      color: isDark ? "#EF4444" : "#DC2626",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    ✗ Access Denied
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: "9px",
+                      color: isDark ? "#A1A1AA" : "#A8A29E",
+                      textAlign: "center",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {urlStatus !== "reachable"
+                      ? "Broker unreachable. Check URL and network."
+                      : "Invalid token or request not approved. Ask the admin."}
+                  </span>
+                </motion.div>
               )}
             </AnimatePresence>
           </button>

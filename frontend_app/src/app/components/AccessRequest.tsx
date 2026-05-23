@@ -23,7 +23,8 @@ export function AccessRequest({ isDark, onBack, brokerUrl }: AccessRequestProps)
     setStatus("requesting");
 
     try {
-      const res = await fetch(`${brokerUrl}/request-waitlist`, {
+      const cleanUrl = brokerUrl.replace(/\/+$/, "");
+      const res = await fetch(`${cleanUrl}/request-waitlist`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -42,7 +43,7 @@ export function AccessRequest({ isDark, onBack, brokerUrl }: AccessRequestProps)
         // Start polling for approval
         const interval = setInterval(async () => {
           try {
-            const pollRes = await fetch(`${brokerUrl}/check-approval`, {
+            const pollRes = await fetch(`${cleanUrl}/check-approval`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
