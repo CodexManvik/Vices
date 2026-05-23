@@ -5,13 +5,12 @@ import { ArrowLeft, Copy, Check, AlertCircle, Clock } from "lucide-react";
 interface AccessRequestProps {
   isDark: boolean;
   onBack: () => void;
+  brokerUrl: string;
 }
 
 type RequestStatus = "idle" | "requesting" | "denied" | "waitlisted" | "approved";
 
-const BROKER_URL = import.meta.env.VITE_BROKER_URL || "http://localhost:9000";
-
-export function AccessRequest({ isDark, onBack }: AccessRequestProps) {
+export function AccessRequest({ isDark, onBack, brokerUrl }: AccessRequestProps) {
   const [name, setName] = useState("");
   const [status, setStatus] = useState<RequestStatus>("idle");
   const [approvalToken, setApprovalToken] = useState<string | null>(null);
@@ -24,7 +23,7 @@ export function AccessRequest({ isDark, onBack }: AccessRequestProps) {
     setStatus("requesting");
 
     try {
-      const res = await fetch(`${BROKER_URL}/request-waitlist`, {
+      const res = await fetch(`${brokerUrl}/request-waitlist`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -43,7 +42,7 @@ export function AccessRequest({ isDark, onBack }: AccessRequestProps) {
         // Start polling for approval
         const interval = setInterval(async () => {
           try {
-            const pollRes = await fetch(`${BROKER_URL}/check-approval`, {
+            const pollRes = await fetch(`${brokerUrl}/check-approval`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",

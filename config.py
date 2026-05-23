@@ -106,7 +106,8 @@ MEDIA_EXTENSIONS = os.getenv("MEDIA_EXTENSIONS", ".jpg,.jpeg,.png,.webp,.gif,.mp
 # ============================================
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
-CORS_ALLOW_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")
+_raw_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
+CORS_ALLOW_ORIGINS = _raw_origins.split(",") if _raw_origins else ["*"]
 CORS_ALLOW_METHODS = os.getenv("CORS_ALLOW_METHODS", "*").split(",")
 CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADERS", "*").split(",")
 VIDEO_RECORDING_MODE = os.getenv("VIDEO_RECORDING_MODE", "false").lower() == "true"
@@ -211,7 +212,9 @@ TAURI_APP_IDENTIFIER = os.getenv("TAURI_APP_IDENTIFIER", "com.persona.ai.vices")
 # ============================================
 # 22. ADMIN & AUTHENTICATION SETTINGS
 # ============================================
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "vices_admin_2026")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+if not ADMIN_PASSWORD:
+    raise RuntimeError("ADMIN_PASSWORD environment variable is not set. Refusing to start.")
 ADMIN_TOKEN_SECRET = os.getenv("ADMIN_TOKEN_SECRET", "your-secret-key-change-in-production")
 REQUEST_STORAGE_PATH = os.getenv("REQUEST_STORAGE_PATH", "access_requests.json")
 APPROVED_TOKENS_PATH = os.getenv("APPROVED_TOKENS_PATH", "approved_tokens.json")

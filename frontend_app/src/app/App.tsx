@@ -14,6 +14,7 @@ export default function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(true);
+  const [brokerUrl, setBrokerUrl] = useState<string>("");
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
 
@@ -95,11 +96,11 @@ export default function App() {
           ) : !authorized ? (
             showAccessRequest ? (
               <motion.div key="access-request" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
-                <AccessRequest isDark={isDark} onBack={() => setShowAccessRequest(false)} />
+                <AccessRequest isDark={isDark} onBack={() => setShowAccessRequest(false)} brokerUrl={brokerUrl} />
               </motion.div>
             ) : (
               <motion.div key="gate" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
-                <Gatekeeper onAuthorized={handleAuthorized} onRequestAccess={() => setShowAccessRequest(true)} isDark={isDark} />
+                <Gatekeeper onAuthorized={handleAuthorized} onRequestAccess={() => setShowAccessRequest(true)} onBrokerUrlSet={(url) => setBrokerUrl(url)} isDark={isDark} />
               </motion.div>
             )
           ) : (
