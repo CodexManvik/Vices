@@ -2,13 +2,15 @@ import os
 import json
 import re
 import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer
 from turbovec import IdMapIndex
 from reranker import rerank
 from config import (
     TV_INDEX_PATH, METADATA_PATH, EMBEDDING_MODEL, RETRIEVAL_INITIAL_K,
     RETRIEVAL_MAX_EXPLICIT_DOCS, RETRIEVAL_FINAL_RETURN_COUNT,
-    EXPLICIT_WORDS, ENABLE_CONTENT_GUARDRAILS, NORMALIZE_SLANG
+    EXPLICIT_WORDS, ENABLE_CONTENT_GUARDRAILS, NORMALIZE_SLANG,
+    MAX_VRAM_ALLOCATION
 )
 
 # --- SYSTEM CONFIGURATION ---
@@ -31,8 +33,11 @@ RETRIEVAL_PARAMS = {
 }
 
 # --- ENGINE INITIALIZATION ---
-print("[RETRIEVAL ENGINE] Initializing embedding models...")
-model = SentenceTransformer(EMBEDDING_MODEL)
+# Safeguard: For 4GB VRAM budgets, execute secondary local pipelines on CPU.
+# This prevents CUDA dynamic allocations from OOM-crashing your primary LLM server (Gemma).
+device = "cuda" if (torch.cuda.is_available() and MAX_VRAM_ALLOCATION > 4) else "cpu"
+print(f"[RETRIEVAL ENGINE] Initializing embedding models on device: {device.upper()}...")
+model = SentenceTransformer(EMBEDDING_MODEL, device=device)
 
 if os.path.exists(TV_INDEX_PATH) and os.path.exists(METADATA_PATH):
     index = IdMapIndex.load(TV_INDEX_PATH)
@@ -43,6 +48,7 @@ else:
     index = None
     metadata_lookup = {}
     print("[WARNING] Vector database matching keys not found! Run build_memory_db.py.")
+
 
 
 # --- CORE LOGIC ---

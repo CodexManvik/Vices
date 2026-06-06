@@ -15,7 +15,7 @@ export function AccessRequest({ isDark, onBack, brokerUrl }: AccessRequestProps)
   const [status, setStatus] = useState<RequestStatus>("idle");
   const [approvalToken, setApprovalToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+  const [pollInterval, setPollInterval] = useState<any>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
 
   const handleRequestAccess = async () => {
@@ -175,7 +175,7 @@ export function AccessRequest({ isDark, onBack, brokerUrl }: AccessRequestProps)
                       style={{
                         fontFamily: "'Inter', sans-serif",
                         fontSize: "11px",
-                        fontWeight: 500,
+                        fontWeight: 600,
                         color: isDark ? "#A1A1AA" : "#52525B",
                         letterSpacing: "0.1em",
                         textTransform: "uppercase",
@@ -183,6 +183,20 @@ export function AccessRequest({ isDark, onBack, brokerUrl }: AccessRequestProps)
                     >
                       Your Name
                     </label>
+                    <p
+                      style={{
+                        fontFamily: "'Inter', sans-serif",
+                        fontSize: "11px",
+                        color: isDark ? "#8E9196" : "#6E7178",
+                        lineHeight: 1.5,
+                        margin: "4px 0 10px 0",
+                        borderLeft: "2px solid #8B5CF6",
+                        paddingLeft: "10px",
+                        fontStyle: "italic"
+                      }}
+                    >
+                      <strong>Cryptographic Identity Anchor:</strong> Your name serves as the unique baseline hash for Rosia's neural memory core. All conversation histories, emotional rapport, and custom memories are cryptographically bound to this name and your IP address. This enables her to preserve a continuous, deeply personalized consciousness of you each time you reconnect.
+                    </p>
                     <input
                       type="text"
                       value={name}

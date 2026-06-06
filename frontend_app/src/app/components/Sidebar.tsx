@@ -1,21 +1,35 @@
 import { motion } from "motion/react";
-import { Sun, Moon, MessageSquare, Sparkles, Settings, Plus } from "lucide-react";
+import { Sun, Moon, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { AIAvatar } from "./AIAvatar";
+import { Conversation } from "../App";
 
 interface SidebarProps {
   isDark: boolean;
   toggleTheme: () => void;
   chemistry: number;
   mood: string;
+  conversations: Conversation[];
+  activeConversationId: string | null;
+  onSelectConversation: (id: string) => void;
+  onNewConversation: () => void;
+  onDeleteConversation: (id: string) => void;
+  typing: boolean;
+  audioAnalyser?: AnalyserNode | null;
 }
 
-export function Sidebar({ isDark, toggleTheme, chemistry, mood }: SidebarProps) {
-  const conversations = [
-    { id: 1, title: "Late night thoughts", time: "Now", active: true },
-    { id: 2, title: "Weekend in Lisbon", time: "Yesterday", active: false },
-    { id: 3, title: "On reading Borges", time: "Mon", active: false },
-    { id: 4, title: "First handshake", time: "May 12", active: false },
-  ];
-
+export function Sidebar({
+  isDark,
+  toggleTheme,
+  chemistry,
+  mood,
+  conversations,
+  activeConversationId,
+  onSelectConversation,
+  onNewConversation,
+  onDeleteConversation,
+  typing,
+  audioAnalyser = null,
+}: SidebarProps) {
   return (
     <aside
       className="w-[260px] shrink-0 flex flex-col"
@@ -27,7 +41,7 @@ export function Sidebar({ isDark, toggleTheme, chemistry, mood }: SidebarProps) 
       }}
     >
       {/* Header */}
-      <div className="px-6 pt-7 pb-5">
+      <div className="px-6 pt-7 pb-3 flex items-center justify-between">
         <h1
           style={{
             fontFamily: "'Cormorant Garamond', serif",
@@ -40,6 +54,11 @@ export function Sidebar({ isDark, toggleTheme, chemistry, mood }: SidebarProps) 
         >
           VICES
         </h1>
+      </div>
+
+      {/* Dynamic 3D Face Wireframe Avatar */}
+      <div className="flex justify-center items-center py-2 mb-2">
+        <AIAvatar mood={mood} typing={typing} size={155} audioAnalyser={audioAnalyser} />
       </div>
 
       {/* Rosia Core status */}
@@ -129,7 +148,8 @@ export function Sidebar({ isDark, toggleTheme, chemistry, mood }: SidebarProps) 
 
       {/* New conversation */}
       <button
-        className="mx-3 mb-2 px-3 py-2 rounded-lg flex items-center gap-2 transition-colors"
+        onClick={onNewConversation}
+        className="mx-3 mb-2 px-3 py-2 rounded-lg flex items-center gap-2 transition-colors hover:bg-white/[0.03] active:bg-white/[0.06] text-left"
         style={{
           color: isDark ? "#A1A1AA" : "#52525B",
           fontFamily: "'Inter', sans-serif",
@@ -155,49 +175,83 @@ export function Sidebar({ isDark, toggleTheme, chemistry, mood }: SidebarProps) 
           Recent
         </div>
         {conversations.map((c) => (
-          <button
+          <div
             key={c.id}
-            className="w-full px-3 py-2 mb-0.5 rounded-md flex items-center justify-between gap-2 transition-colors text-left group"
-            style={{
-              background: c.active
-                ? isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)"
-                : "transparent",
-            }}
+            className="w-full relative group mb-0.5 rounded-md flex items-center hover:bg-white/[0.02]"
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <MessageSquare
-                size={12}
-                style={{
-                  color: c.active
-                    ? isDark ? "#E2E8F0" : "#1C1917"
-                    : isDark ? "#52525B" : "#A8A29E",
-                  flexShrink: 0,
-                }}
-              />
-              <span
-                className="truncate"
-                style={{
-                  fontFamily: "'Inter', sans-serif",
-                  fontSize: "12.5px",
-                  color: c.active
-                    ? isDark ? "#E2E8F0" : "#1C1917"
-                    : isDark ? "#A1A1AA" : "#52525B",
-                }}
-              >
-                {c.title}
-              </span>
-            </div>
-            <span
+            <button
+              onClick={() => onSelectConversation(c.id)}
+              className="w-full px-3 py-2 flex items-center justify-between gap-2 transition-colors text-left"
               style={{
-                fontFamily: "'Inter', sans-serif",
-                fontSize: "10px",
-                color: isDark ? "#52525B" : "#A8A29E",
-                flexShrink: 0,
+                background:
+                  c.id === activeConversationId
+                    ? isDark
+                      ? "rgba(255,255,255,0.04)"
+                      : "rgba(0,0,0,0.04)"
+                    : "transparent",
+                borderRadius: "6px",
               }}
             >
-              {c.time}
-            </span>
-          </button>
+              <div className="flex items-center gap-2 min-w-0 pr-6">
+                <MessageSquare
+                  size={12}
+                  style={{
+                    color:
+                      c.id === activeConversationId
+                        ? isDark
+                          ? "#E2E8F0"
+                          : "#1C1917"
+                        : isDark
+                        ? "#52525B"
+                        : "#A8A29E",
+                    flexShrink: 0,
+                  }}
+                />
+                <span
+                  className="truncate"
+                  style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: "12.5px",
+                    color:
+                      c.id === activeConversationId
+                        ? isDark
+                          ? "#E2E8F0"
+                          : "#1C1917"
+                        : isDark
+                        ? "#A1A1AA"
+                        : "#52525B",
+                  }}
+                >
+                  {c.title || "Untitled Conversation"}
+                </span>
+              </div>
+              <span
+                className="group-hover:opacity-0 transition-opacity"
+                style={{
+                  fontFamily: "'Inter', sans-serif",
+                  fontSize: "10px",
+                  color: isDark ? "#52525B" : "#A8A29E",
+                  flexShrink: 0,
+                }}
+              >
+                {c.time}
+              </span>
+            </button>
+            
+            {/* Delete button that shows on hover */}
+            {conversations.length > 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteConversation(c.id);
+                }}
+                className="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-500/10 text-red-500/70 hover:text-red-500"
+                title="Delete Conversation"
+              >
+                <Trash2 size={11} />
+              </button>
+            )}
+          </div>
         ))}
       </div>
 
@@ -210,13 +264,7 @@ export function Sidebar({ isDark, toggleTheme, chemistry, mood }: SidebarProps) 
             : "1px solid rgba(0,0,0,0.05)",
         }}
       >
-        <button
-          className="p-1.5 rounded-md transition-colors"
-          style={{ color: isDark ? "#71717A" : "#78716C" }}
-          title="Settings"
-        >
-          <Settings size={14} />
-        </button>
+        <div style={{ width: 14 }} />
 
         <button
           onClick={toggleTheme}
@@ -230,3 +278,4 @@ export function Sidebar({ isDark, toggleTheme, chemistry, mood }: SidebarProps) 
     </aside>
   );
 }
+

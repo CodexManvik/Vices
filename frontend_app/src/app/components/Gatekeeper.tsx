@@ -21,6 +21,68 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
   const [telemetry, setTelemetry] = useState(true);
   const [showBrokerInput, setShowBrokerInput] = useState(true);
 
+  // Load saved credentials on mount
+  useEffect(() => {
+    const savedToken = localStorage.getItem("vices_tester_token");
+    const savedBroker = localStorage.getItem("vices_broker_url");
+    if (savedToken) setToken(savedToken);
+    if (savedBroker) {
+      setBrokerUrl(savedBroker);
+      onBrokerUrlSet(savedBroker);
+      setShowBrokerInput(false);
+    }
+  }, []);
+
+  // IP-based Auto-Login once broker URL is verified as reachable
+  useEffect(() => {
+    if (urlStatus === "reachable" && brokerUrl.trim()) {
+      const checkAutoLogin = async () => {
+        try {
+          let cleanUrl = brokerUrl.trim();
+          if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+            cleanUrl = `https://${cleanUrl}`;
+          }
+          cleanUrl = cleanUrl.replace(/\/+$/, "");
+
+          const res = await fetch(`${cleanUrl}/resolve-ip`, {
+            method: "GET",
+            headers: { "ngrok-skip-browser-warning": "bypass" }
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === "approved" && data.token) {
+              console.log("[Auth IP] Automatically resolved tester token for client IP.");
+              setToken(data.token);
+              setStatus("pinging");
+
+              const accessRes = await fetch(`${cleanUrl}/request-access`, {
+                method: "POST",
+                headers: {
+                  "x-tester-token": data.token,
+                  "ngrok-skip-browser-warning": "bypass"
+                }
+              });
+
+              const accessData = await accessRes.json();
+              if (accessData.status === "allocated" && accessData.session_url) {
+                const url = accessData.session_url.replace(/\/+$/, "").trim();
+                localStorage.setItem("vices_tester_token", data.token);
+                localStorage.setItem("vices_broker_url", brokerUrl.trim());
+                setTimeout(() => onAuthorized(url), 600);
+              } else {
+                setStatus("idle");
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Auto-login check failed:", err);
+        }
+      };
+      checkAutoLogin();
+    }
+  }, [urlStatus, brokerUrl]);
+
   // Real-time URL validation
   useEffect(() => {
     const validateUrl = async () => {
@@ -33,13 +95,14 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
       setUrlStatus("checking");
       setUrlMessage("Checking broker connection...");
 
+      // Ensure URL has https:// prefix if no scheme provided
+      let cleanUrl = brokerUrl.trim();
+      if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+        cleanUrl = `https://${cleanUrl}`;
+      }
+      cleanUrl = cleanUrl.replace(/\/+$/, "");
+
       try {
-        // Ensure URL has https:// prefix if no scheme provided
-        let cleanUrl = brokerUrl.trim();
-        if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
-          cleanUrl = `https://${cleanUrl}`;
-        }
-        cleanUrl = cleanUrl.replace(/\/+$/, "");
         
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
@@ -113,6 +176,8 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
       if (data.status === "allocated" && data.session_url) {
         const url = data.session_url.replace(/\/+$/, "").trim();
         if (url) {
+          localStorage.setItem("vices_tester_token", token);
+          localStorage.setItem("vices_broker_url", brokerUrl.trim());
           onAuthorized(url);
         } else {
           setStatus("denied");
@@ -275,6 +340,7 @@ export function Gatekeeper({ onAuthorized, onRequestAccess, onBrokerUrlSet, isDa
                   alert("Please enter a valid and reachable broker URL first.");
                   return;
                 }
+                localStorage.setItem("vices_broker_url", brokerUrl.trim());
                 onBrokerUrlSet(brokerUrl);
                 setShowBrokerInput(false);
               }}

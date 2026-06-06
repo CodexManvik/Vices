@@ -39,3 +39,4 @@ turbovec_memory.tvim
 access_requests.json
 approved_tokens.json
 memory_metadata.json
+.continue/

@@ -1,5 +1,5 @@
 # generation.py
-import requests
+import httpx
 import json
 import re
 from rich.console import Console
@@ -9,6 +9,7 @@ console = Console()
 
 def get_available_models():
     """Queries the local llama.cpp server for loaded/available models."""
+    import requests
     try:
         res = requests.get(f"{LLAMA_BASE_URL}/models", timeout=5)
         if res.status_code == 200:
@@ -19,8 +20,6 @@ def get_available_models():
 
 def switch_active_model(model_path):
     """Instructs llama.cpp to load a new model payload dynamically."""
-    # Note: Advanced variants of llama-server support dynamic runtime loading via custom management slots.
-    # If using the standard /v1 endpoint, you pass the requested model ID in your completion payload.
     return {"status": "success", "active_model": model_path}
 
 def clean_chunk(text):
@@ -30,8 +29,8 @@ def clean_chunk(text):
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
     return text
 
-def generate_stream(messages, target_model="default"):
-    """Streams completions cleanly from the unified local engine."""
+async def generate_stream(messages, target_model="default"):
+    """Streams completions cleanly and asynchronously from the unified local engine."""
     
     # Debug: Check for vision content
     has_vision = False
@@ -53,7 +52,8 @@ def generate_stream(messages, target_model="default"):
         "top_p": GENERATION_TOP_P,
         "frequency_penalty": GENERATION_FREQUENCY_PENALTY,
         "presence_penalty": GENERATION_PRESENCE_PENALTY,
-        "stream": True
+        "stream": True,
+        "cache_prompt": True  # <-- MASSIVE LLAMA.CPP SPEEDUP: Recycle KV cache keys!
     }
 
     # Inject user-selected model ID if distinct from active context slot
@@ -61,43 +61,43 @@ def generate_stream(messages, target_model="default"):
         payload["model"] = str(target_model)
 
     try:
-        response = requests.post(
-            f"{LLAMA_BASE_URL}/chat/completions",
-            json=payload,
-            stream=True,
-            timeout=LLAMA_TIMEOUT
-        )
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        async with httpx.AsyncClient(limits=limits, timeout=LLAMA_TIMEOUT) as client:
+            async with client.stream(
+                "POST",
+                f"{LLAMA_BASE_URL}/chat/completions",
+                json=payload
+            ) as response:
+                if response.status_code != 200:
+                    body_raw = await response.aread()
+                    snippet = body_raw[:800].decode("utf-8", errors="ignore")
+                    yield (
+                        " [Engine Fault]: llama.cpp/chat/completions returned an error.\n"
+                        f" HTTP {response.status_code}. Body (truncated): {snippet}"
+                    )
+                    return
 
-        if response.status_code != 200:
-            snippet = (response.text or "")[:800]
-            yield (
-                " [Engine Fault]: llama.cpp/chat/completions returned an error.\n"
-                f" HTTP {response.status_code}. Body (truncated): {snippet}"
-            )
-            return
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
 
-        for line in response.iter_lines():
-            if not line:
-                continue
+                    if line.startswith("data: "):
+                        content_raw = line[6:].strip()
 
-            decoded_line = line.decode('utf-8')
-            if decoded_line.startswith("data: "):
-                content_raw = decoded_line[6:].strip()
+                        if content_raw == "[DONE]":
+                            break
 
-                if content_raw == "[DONE]":
-                    break
+                        try:
+                            chunk_json = json.loads(content_raw)
+                            if "choices" in chunk_json and len(chunk_json["choices"]) > 0:
+                                delta = chunk_json["choices"][0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield clean_chunk(content)
+                        except json.JSONDecodeError:
+                            continue
 
-                try:
-                    chunk_json = json.loads(content_raw)
-                    if "choices" in chunk_json and len(chunk_json["choices"]) > 0:
-                        delta = chunk_json["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield clean_chunk(content)
-                except json.JSONDecodeError:
-                    continue
-
-    except requests.exceptions.ConnectionError:
+    except httpx.ConnectError:
         yield (
             " [Model not connected properly]: Could not connect to the local engine.\n"
             f" Tried: {LLAMA_BASE_URL}/chat/completions\n"
@@ -109,3 +109,4 @@ def generate_stream(messages, target_model="default"):
             f" Tried: {LLAMA_BASE_URL}/chat/completions\n"
             f" Error: {str(e)}"
         )
+

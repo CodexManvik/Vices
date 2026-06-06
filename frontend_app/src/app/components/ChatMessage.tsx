@@ -11,7 +11,9 @@ import {
   ThumbsDown,
   Check,
   Maximize2,
+  Camera,
 } from "lucide-react";
+
 
 export interface Message {
   id: string;
@@ -35,21 +37,24 @@ interface ChatMessageProps {
 
 function renderRosiaContent(text: string, isDark: boolean) {
   const cleanedText = text.replace(/\[(TRIGGER_SELFIE|CALL_TOOL)[^\]]*\]?/gi, "");
-  const parts = cleanedText.split(/(\\*[^*]+\\*)/g).filter(Boolean);
+  const parts = cleanedText.split(/(\*[^*]+\*)/g).filter(Boolean);
   return parts.map((part, i) => {
     if (part.startsWith("*") && part.endsWith("*")) {
       return (
         <span
           key={i}
-          className="inline-block px-2 py-0.5 mx-0.5 rounded-md italic align-baseline"
+          className="inline-block px-2.5 py-0.5 mx-0.5 rounded-md italic align-baseline transition-all duration-300 hover:scale-[1.02] hover:bg-opacity-20 cursor-default"
           style={{
-            color: isDark ? "#A1A1AA" : "#78716C",
+            color: isDark ? "#C084FC" : "#7E3AF2",
+            background: isDark
+              ? "rgba(168, 85, 247, 0.08)"
+              : "rgba(126, 58, 242, 0.05)",
             border: isDark
-              ? "1px solid rgba(226,232,240,0.15)"
-              : "1px solid rgba(28,25,23,0.12)",
+              ? "1px solid rgba(168, 85, 247, 0.15)"
+              : "1px solid rgba(126, 58, 242, 0.12)",
+            boxShadow: isDark ? "0 0 10px rgba(168, 85, 247, 0.08)" : "none",
             fontFamily: "'Inter', sans-serif",
             fontSize: "14.5px",
-            fontStyle: "italic",
           }}
         >
           {part.slice(1, -1)}
@@ -216,11 +221,21 @@ export function ChatMessage({
           >
             <span
               style={{
-                fontFamily: "'Cormorant Garamond', serif",
-                fontSize: "13px",
-                color: isDark ? "#E2E8F0" : "#1C1917",
-                filter: isDark ? "drop-shadow(0 0 6px rgba(226,232,240,0.4))" : "none",
-                lineHeight: 1,
+                width: 14,
+                height: 14,
+                borderRadius: "50%",
+                background: isDark
+                  ? "linear-gradient(135deg, rgba(56,189,248,0.3), rgba(6,182,212,0.2))"
+                  : "linear-gradient(135deg, rgba(56,189,248,0.2), rgba(6,182,212,0.15))",
+                border: isDark
+                  ? "1px solid rgba(56,189,248,0.25)"
+                  : "1px solid rgba(6,182,212,0.2)",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "7px",
+                color: isDark ? "#38BDF8" : "#0891B2",
+                flexShrink: 0,
               }}
             >
               ✦
@@ -276,26 +291,75 @@ export function ChatMessage({
           >
             {message.imageLoading ? (
               <div
-                className="relative w-full"
+                className="relative w-full overflow-hidden flex flex-col items-center justify-center gap-4"
                 style={{
                   aspectRatio: "4/3",
-                  background: isDark ? "linear-gradient(135deg, #141414, #0A0A0A)" : "linear-gradient(135deg, #F5F5F4, #E7E5E4)",
-                  overflow: "hidden",
+                  background: isDark 
+                    ? "radial-gradient(circle at center, rgba(168, 85, 247, 0.08) 0%, #0A0A0A 80%)" 
+                    : "radial-gradient(circle at center, rgba(126, 58, 242, 0.05) 0%, #F5F5F4 80%)",
+                  border: isDark ? "1px solid rgba(168, 85, 247, 0.15)" : "1px solid rgba(126, 58, 242, 0.12)",
+                  borderRadius: "12px",
                 }}
               >
+                {/* Scanner Beam Animation */}
                 <motion.div
-                  className="absolute inset-0"
-                  animate={{ x: ["-100%", "100%"] }}
-                  transition={{ duration: 2.2, repeat: Infinity, ease: "linear" }}
+                  className="absolute left-0 right-0 h-[2px] z-10 opacity-60"
+                  animate={{ top: ["0%", "100%", "0%"] }}
+                  transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
                   style={{
-                    background: isDark
-                      ? "linear-gradient(90deg, transparent, rgba(226,232,240,0.1), transparent)"
-                      : "linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent)",
+                    background: "linear-gradient(90deg, transparent, #C084FC, transparent)",
+                    boxShadow: "0 0 8px #C084FC",
                   }}
                 />
-                <div className="absolute inset-0 flex flex-col justify-end p-4 gap-2">
-                  <div className="h-2 w-2/3 rounded" style={{ background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.06)" }} />
-                  <div className="h-2 w-1/2 rounded" style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)" }} />
+
+                {/* Shimmer Effect */}
+                <motion.div
+                  className="absolute inset-0 pointer-events-none"
+                  animate={{ x: ["-100%", "100%"] }}
+                  transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
+                  style={{
+                    background: isDark
+                      ? "linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.03), transparent)"
+                      : "linear-gradient(90deg, transparent, rgba(126, 58, 242, 0.03), transparent)",
+                  }}
+                />
+
+                {/* Animated Camera Icon */}
+                <motion.div
+                  animate={{ 
+                    scale: [0.95, 1.05, 0.95],
+                    rotate: [0, 2, -2, 0]
+                  }}
+                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                  className="p-4 rounded-full flex items-center justify-center"
+                  style={{
+                    background: isDark ? "rgba(168, 85, 247, 0.06)" : "rgba(126, 58, 242, 0.04)",
+                    border: isDark ? "1px solid rgba(168, 85, 247, 0.2)" : "1px solid rgba(126, 58, 242, 0.15)",
+                    boxShadow: isDark ? "0 0 20px rgba(168, 85, 247, 0.1)" : "none",
+                  }}
+                >
+                  <Camera 
+                    className="w-10 h-10" 
+                    style={{ 
+                      color: isDark ? "#C084FC" : "#7E3AF2",
+                      filter: isDark ? "drop-shadow(0 0 8px rgba(168,85,247,0.5))" : "none"
+                    }} 
+                  />
+                </motion.div>
+
+                {/* Status Message */}
+                <div className="flex flex-col items-center gap-1.5 z-20">
+                  <motion.span 
+                    animate={{ opacity: [0.4, 1, 0.4] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                    className="text-xs uppercase font-mono tracking-widest font-semibold"
+                    style={{ color: isDark ? "#C084FC" : "#7E3AF2" }}
+                  >
+                    Taking a pic...
+                  </motion.span>
+                  <span className="text-[10px] opacity-50" style={{ color: isDark ? "#A1A1AA" : "#78716C" }}>
+                    synthesizing digital memory
+                  </span>
                 </div>
               </div>
             ) : (
