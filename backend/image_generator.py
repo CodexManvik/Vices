@@ -2,6 +2,7 @@
 import torch
 import gc
 import os
+import json
 import tempfile
 import traceback
 from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
@@ -74,8 +75,36 @@ def _load_image_assets():
     return _pipe, _compel_proc
 
 
-def enhance_image_prompt(user_description: str, original_user_input: str) -> str:
+def load_dynamic_sd_settings() -> dict:
+    """Reads dynamic SD settings from settings.json if it exists, otherwise falls back to config defaults."""
+    from pathlib import Path
+    settings_path = Path(__file__).parent / "data" / "settings.json"
+    defaults = {
+        "sd_steps": IMAGE_INFERENCE_STEPS,
+        "sd_cfg_scale": IMAGE_GUIDANCE_SCALE,
+        "sd_negative_prompt": IMAGE_NEGATIVE_PROMPT,
+        "sd_base_prompt": IMAGE_BASE_PROMPT
+    }
+    if settings_path.exists():
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return {
+                    "sd_steps": int(data.get("sd_steps", IMAGE_INFERENCE_STEPS)),
+                    "sd_cfg_scale": float(data.get("sd_cfg_scale", IMAGE_GUIDANCE_SCALE)),
+                    "sd_negative_prompt": str(data.get("sd_negative_prompt", IMAGE_NEGATIVE_PROMPT)),
+                    "sd_base_prompt": str(data.get("sd_base_prompt", IMAGE_BASE_PROMPT))
+                }
+        except Exception:
+            pass
+    return defaults
+
+
+def enhance_image_prompt(user_description: str, original_user_input: str, base_prompt: str = None) -> str:
     """Dynamically enhance the Stable Diffusion prompt with context-aware aesthetic tags."""
+    if base_prompt is None:
+        base_prompt = BASE_PROMPT
+
     explicit_keywords = [
         "lingerie", "bikini", "underwear", "bra", "panties", "cleavage", "bare", "nude",
         "naked", "topless", "boudoir", "bedroom", "bed", "shower", "wet", "nsfw", "sensual",
@@ -91,7 +120,7 @@ def enhance_image_prompt(user_description: str, original_user_input: str) -> str
             "sultry bedroom eyes, alluring posture, perfect curves, detailed skin texture, "
             "lace detailing, beautiful cleavage, (sensual, erotic:1.15), voluptuous body shape, bare shoulders"
         )
-        enhanced = f"{user_description}, {explicit_tags}, {BASE_PROMPT}"
+        enhanced = f"{user_description}, {explicit_tags}, {base_prompt}"
         print(f"[IMAGE GEN] Sensual context detected. Injected explicit enhancements.")
     else:
         # High-fidelity fashion enhancement tags for regular everyday/outdoor clothes
@@ -99,7 +128,7 @@ def enhance_image_prompt(user_description: str, original_user_input: str) -> str
             "fashion photography, professional model pose, studio lighting, detailed garments, "
             "highly realistic fabric texture, sharp focus, aesthetic composition"
         )
-        enhanced = f"{user_description}, {fashion_tags}, {BASE_PROMPT}"
+        enhanced = f"{user_description}, {fashion_tags}, {base_prompt}"
         print(f"[IMAGE GEN] Casual context detected. Injected fashion photography tags.")
         
     return enhanced
@@ -109,11 +138,17 @@ def generate_selfie(user_description: str, original_user_input: str = ""):
     try:
         pipe, compel_proc = _load_image_assets()
 
-        final_prompt = enhance_image_prompt(user_description, original_user_input)
+        sd_settings = load_dynamic_sd_settings()
+        base_prompt = sd_settings["sd_base_prompt"]
+        neg_prompt = sd_settings["sd_negative_prompt"]
+        steps = sd_settings["sd_steps"]
+        cfg = sd_settings["sd_cfg_scale"]
+
+        final_prompt = enhance_image_prompt(user_description, original_user_input, base_prompt)
         print(f"[IMAGE GEN] Generating crisp asset with prompt: {final_prompt[:140]}...")
 
         prompt_embeds = compel_proc(final_prompt)
-        negative_embeds = compel_proc(NEGATIVE_PROMPT)
+        negative_embeds = compel_proc(neg_prompt)
         [prompt_embeds, negative_embeds] = compel_proc.pad_conditioning_tensors_to_same_length(
             [prompt_embeds, negative_embeds]
         )
@@ -121,8 +156,8 @@ def generate_selfie(user_description: str, original_user_input: str = ""):
         image = pipe(
             prompt_embeds=prompt_embeds,
             negative_prompt_embeds=negative_embeds,
-            num_inference_steps=IMAGE_INFERENCE_STEPS,
-            guidance_scale=IMAGE_GUIDANCE_SCALE,
+            num_inference_steps=steps,
+            guidance_scale=cfg,
         ).images[0]
 
         filename = f"selfie_{os.urandom(6).hex()}.jpg"

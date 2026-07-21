@@ -5,8 +5,10 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 LLAMA_URL = "http://127.0.0.1:8080/completion"
-INPUT_FILE = "personality_dataset.json"
-OUTPUT_FILE = "classified_memories.json"
+from pathlib import Path
+BACKEND_DIR = Path(__file__).parent
+INPUT_FILE = str(BACKEND_DIR / "data" / "personality_dataset.json")
+OUTPUT_FILE = str(BACKEND_DIR / "data" / "classified_memories.json")
 
 # Number of simultaneous HTTP worker threads feeding the local server
 MAX_WORKERS = 10  

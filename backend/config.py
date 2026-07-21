@@ -7,8 +7,11 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env file
-load_dotenv()
+# Load .env file from root directory
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ============================================
 # 1. MODEL & ENGINE CONFIGURATION
@@ -36,13 +39,13 @@ DPO_BETA = float(os.getenv("DPO_BETA", "0.1"))
 # ============================================
 # 2. MEMORY & DATABASE PATHS
 # ============================================
-TV_INDEX_PATH = os.getenv("TV_INDEX_PATH", "turbovec_memory.tvim")
-METADATA_PATH = os.getenv("METADATA_PATH", "memory_metadata.json")
-GRAPH_DATABASE_PATH = os.getenv("GRAPH_DATABASE_PATH", "lancedb_data/relational_graph.json")
-CLASSIFIED_MEMORIES_PATH = os.getenv("CLASSIFIED_MEMORIES_PATH", "classified_memories.json")
-PERSONALITY_DATASET_PATH = os.getenv("PERSONALITY_DATASET_PATH", "personality_dataset.json")
-PREFERENCES_PATH = os.getenv("PREFERENCES_PATH", "preferences.jsonl")
-MEMORY_TELEMETRY_PATH = os.getenv("MEMORY_TELEMETRY_PATH", "telemetry_logs.jsonl")
+TV_INDEX_PATH = os.getenv("TV_INDEX_PATH", str(DATA_DIR / "turbovec_memory.tvim"))
+METADATA_PATH = os.getenv("METADATA_PATH", str(DATA_DIR / "memory_metadata.json"))
+GRAPH_DATABASE_PATH = os.getenv("GRAPH_DATABASE_PATH", str(DATA_DIR / "lancedb_data" / "relational_graph.json"))
+CLASSIFIED_MEMORIES_PATH = os.getenv("CLASSIFIED_MEMORIES_PATH", str(DATA_DIR / "classified_memories.json"))
+PERSONALITY_DATASET_PATH = os.getenv("PERSONALITY_DATASET_PATH", str(DATA_DIR / "personality_dataset.json"))
+PREFERENCES_PATH = os.getenv("PREFERENCES_PATH", str(DATA_DIR / "preferences.jsonl"))
+MEMORY_TELEMETRY_PATH = os.getenv("MEMORY_TELEMETRY_PATH", str(DATA_DIR / "telemetry_logs.jsonl"))
 
 # ============================================
 # 3. RETRIEVAL ENGINE PARAMETERS
@@ -217,5 +220,17 @@ if not ADMIN_PASSWORD:
     raise RuntimeError("ADMIN_PASSWORD environment variable is not set. Refusing to start.")
 MASTER_TOKEN = os.getenv("MASTER_TOKEN") # <-- Add this line
 ADMIN_TOKEN_SECRET = os.getenv("ADMIN_TOKEN_SECRET", "your-secret-key-change-in-production")
-REQUEST_STORAGE_PATH = os.getenv("REQUEST_STORAGE_PATH", "access_requests.json")
-APPROVED_TOKENS_PATH = os.getenv("APPROVED_TOKENS_PATH", "approved_tokens.json")
+REQUEST_STORAGE_PATH = os.getenv("REQUEST_STORAGE_PATH", str(DATA_DIR / "access_requests.json"))
+APPROVED_TOKENS_PATH = os.getenv("APPROVED_TOKENS_PATH", str(DATA_DIR / "approved_tokens.json"))
+
+# ============================================
+# 23. RULE ENGINE (DGBA) CONFIGURATION
+# ============================================
+# Number of interactions between meta-cognitive consolidation passes.
+RULE_ENGINE_CONSOLIDATION_INTERVAL = int(os.getenv("RULE_ENGINE_CONSOLIDATION_INTERVAL", "10"))
+# Max rules the model can generate in a single consolidation pass.
+RULE_ENGINE_MAX_RULES_PER_PASS = int(os.getenv("RULE_ENGINE_MAX_RULES_PER_PASS", "3"))
+# Top-K approved rules retrieved per prompt build.
+RULE_ENGINE_TOP_K_RULES = int(os.getenv("RULE_ENGINE_TOP_K_RULES", "5"))
+# Lower temperature for reflection pass — reduces hallucinated rule content.
+RULE_ENGINE_REFLECTION_TEMPERATURE = float(os.getenv("RULE_ENGINE_REFLECTION_TEMPERATURE", "0.35"))

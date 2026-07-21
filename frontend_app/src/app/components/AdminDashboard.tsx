@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, CheckCircle, XCircle, Clock, Copy, Check, Loader2, Lock, Eye, EyeOff } from "lucide-react";
+import { RuleReviewPanel } from "./RuleReviewPanel";
+import { TransactionLogPanel } from "./TransactionLogPanel";
+import { PermissionManifestEditor } from "./PermissionManifestEditor";
+import { EvaluationDashboard } from "./EvaluationDashboard";
 
 interface Request {
   id: string;
@@ -42,8 +46,8 @@ export function AdminDashboard({ isDark, onBack, sessionUrl }: AdminDashboardPro
   const [showPassword, setShowPassword] = useState(false);
   const [authenticating, setAuthenticating] = useState(false);
 
-  // Tabs: waitlist or dpo
-  const [activeTab, setActiveTab] = useState<"waitlist" | "dpo">("waitlist");
+  // Tabs: waitlist, dpo, rules, transactions, permissions, or eval
+  const [activeTab, setActiveTab] = useState<"waitlist" | "dpo" | "rules" | "transactions" | "permissions" | "eval">("waitlist");
 
   // DPO Alignment States
   const [preferences, setPreferences] = useState<any[]>([]);
@@ -650,6 +654,58 @@ export function AdminDashboard({ isDark, onBack, sessionUrl }: AdminDashboardPro
             >
               DPO Preference Alignment
             </button>
+            <button
+              onClick={() => setActiveTab("rules")}
+              className="py-3 px-2 text-xs font-semibold tracking-widest uppercase transition-all duration-300 relative flex items-center gap-1.5"
+              style={{
+                color: activeTab === "rules" ? (isDark ? "#E2E8F0" : "#1C1917") : (isDark ? "#52525B" : "#A8A29E"),
+                borderBottom: activeTab === "rules" ? `2px solid ${isDark ? "#8B5CF6" : "#7C3AED"}` : "none",
+                cursor: "pointer",
+                background: "transparent",
+                border: "none",
+              }}
+            >
+              <span>DGBA Rule Directives</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("transactions")}
+              className="py-3 px-2 text-xs font-semibold tracking-widest uppercase transition-all duration-300 relative flex items-center gap-1.5"
+              style={{
+                color: activeTab === "transactions" ? (isDark ? "#E2E8F0" : "#1C1917") : (isDark ? "#52525B" : "#A8A29E"),
+                borderBottom: activeTab === "transactions" ? `2px solid ${isDark ? "#8B5CF6" : "#7C3AED"}` : "none",
+                cursor: "pointer",
+                background: "transparent",
+                border: "none",
+              }}
+            >
+              <span>Audit &amp; Rollback Log</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("permissions")}
+              className="py-3 px-2 text-xs font-semibold tracking-widest uppercase transition-all duration-300 relative flex items-center gap-1.5"
+              style={{
+                color: activeTab === "permissions" ? (isDark ? "#E2E8F0" : "#1C1917") : (isDark ? "#52525B" : "#A8A29E"),
+                borderBottom: activeTab === "permissions" ? `2px solid ${isDark ? "#8B5CF6" : "#7C3AED"}` : "none",
+                cursor: "pointer",
+                background: "transparent",
+                border: "none",
+              }}
+            >
+              <span>Security Permissions</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("eval")}
+              className="py-3 px-2 text-xs font-semibold tracking-widest uppercase transition-all duration-300 relative flex items-center gap-1.5"
+              style={{
+                color: activeTab === "eval" ? (isDark ? "#E2E8F0" : "#1C1917") : (isDark ? "#52525B" : "#A8A29E"),
+                borderBottom: activeTab === "eval" ? `2px solid ${isDark ? "#8B5CF6" : "#7C3AED"}` : "none",
+                cursor: "pointer",
+                background: "transparent",
+                border: "none",
+              }}
+            >
+              <span>Dissertation Eval</span>
+            </button>
           </div>
         </div>
       )}
@@ -1210,6 +1266,34 @@ export function AdminDashboard({ isDark, onBack, sessionUrl }: AdminDashboardPro
                 )}
               </div>
             </div>
+          )}
+          {activeTab === "rules" && (
+            <RuleReviewPanel
+              isDark={isDark}
+              sessionUrl={sessionUrl}
+              adminPassword={password}
+            />
+          )}
+          {activeTab === "transactions" && (
+            <TransactionLogPanel
+              isDark={isDark}
+              sessionUrl={sessionUrl}
+              adminPassword={password}
+            />
+          )}
+          {activeTab === "permissions" && (
+            <PermissionManifestEditor
+              isDark={isDark}
+              sessionUrl={sessionUrl}
+              adminPassword={password}
+            />
+          )}
+          {activeTab === "eval" && (
+            <EvaluationDashboard
+              isDark={isDark}
+              sessionUrl={sessionUrl}
+              adminPassword={password}
+            />
           )}
         </div>
       </div>

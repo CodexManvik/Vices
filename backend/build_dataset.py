@@ -8,8 +8,10 @@ from detoxify import Detoxify
 from sentence_transformers import SentenceTransformer
 
 # Configurations
-EXPORTS_DIR = "exports"
-OUTPUT_FILE = "personality_dataset.json"
+from pathlib import Path
+BACKEND_DIR = Path(__file__).parent
+EXPORTS_DIR = str(BACKEND_DIR / "data" / "exports")
+OUTPUT_FILE = str(BACKEND_DIR / "data" / "personality_dataset.json")
 MIN_WORDS = 1
 MAX_SIMILARITY = 92
 MAX_SEMANTIC_SIM = 0.95

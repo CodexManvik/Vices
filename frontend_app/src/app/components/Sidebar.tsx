@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Sun, Moon, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { Sun, Moon, MessageSquare, Plus, Trash2, Settings, Database, Sliders } from "lucide-react";
 import { AIAvatar } from "./AIAvatar";
 import { Conversation } from "../App";
 
@@ -15,6 +15,10 @@ interface SidebarProps {
   onDeleteConversation: (id: string) => void;
   typing: boolean;
   audioAnalyser?: AnalyserNode | null;
+  activeCompanionName?: string;
+  onConfigurePersona?: () => void;
+  onShowSettings?: () => void;
+  onShowMemory?: () => void;
 }
 
 export function Sidebar({
@@ -29,6 +33,10 @@ export function Sidebar({
   onDeleteConversation,
   typing,
   audioAnalyser = null,
+  activeCompanionName = "Rosia",
+  onConfigurePersona,
+  onShowSettings,
+  onShowMemory,
 }: SidebarProps) {
   return (
     <aside
@@ -97,7 +105,7 @@ export function Sidebar({
                 letterSpacing: "0.02em",
               }}
             >
-              Rosia Core
+              {activeCompanionName} Core
             </span>
           </div>
           <span
@@ -264,11 +272,38 @@ export function Sidebar({
             : "1px solid rgba(0,0,0,0.05)",
         }}
       >
-        <div style={{ width: 14 }} />
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onConfigurePersona}
+            className="p-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:bg-white/[0.04]"
+            style={{ color: isDark ? "#71717A" : "#78716C" }}
+            title="Configure Persona"
+          >
+            <Settings size={14} />
+          </button>
+
+          <button
+            onClick={onShowMemory}
+            className="p-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:bg-white/[0.04]"
+            style={{ color: isDark ? "#71717A" : "#78716C" }}
+            title="Memory Database Diagnostics"
+          >
+            <Database size={14} />
+          </button>
+
+          <button
+            onClick={onShowSettings}
+            className="p-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:bg-white/[0.04]"
+            style={{ color: isDark ? "#71717A" : "#78716C" }}
+            title="Advanced System Config"
+          >
+            <Sliders size={14} />
+          </button>
+        </div>
 
         <button
           onClick={toggleTheme}
-          className="p-1.5 rounded-md transition-colors flex items-center gap-1.5"
+          className="p-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:bg-white/[0.04]"
           style={{ color: isDark ? "#71717A" : "#78716C" }}
           title="Toggle theme"
         >

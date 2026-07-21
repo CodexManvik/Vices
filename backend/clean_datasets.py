@@ -1,8 +1,10 @@
 import os
 import json
 
-EXPORTS_DIR = "exports"
-OUTPUT_FILE = "personality_dataset.json"
+from pathlib import Path
+BACKEND_DIR = Path(__file__).parent
+EXPORTS_DIR = str(BACKEND_DIR / "data" / "exports")
+OUTPUT_FILE = str(BACKEND_DIR / "data" / "personality_dataset.json")
 
 MIN_LENGTH = 5
 

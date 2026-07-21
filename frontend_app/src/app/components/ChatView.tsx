@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ArrowDown, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ArrowDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { ChatMessage, Message } from "./ChatMessage";
 import { CommandBar } from "./CommandBar";
+import { calculateLocalEmotionShift } from "../utils/emotionEngine";
+import { cleanClientShorthand } from "../utils/textCleaner";
+import { extractUrls, fetchUrlContent } from "../utils/urlFetcher";
 
 
 interface ChatViewProps {
@@ -123,13 +126,17 @@ export function ChatView({
     if (!sessionUrl || typing || !activeConversationId) return;
     if (!text.trim() && (!image)) return;
 
+    // --- Task 2: Sanitize shorthand before rendering and network dispatch ---
+    const sanitizedText = cleanClientShorthand(text);
+
     const id = (messageIdRef.current++).toString();
     const assistantId = (messageIdRef.current++).toString();
 
     const newMsg: Message = {
       id,
       role: "user",
-      text,
+      // Display the sanitized version in the chat bubble
+      text: sanitizedText,
       time: nowTime(),
     };
 
@@ -138,32 +145,77 @@ export function ChatView({
       newMsg,
       { id: assistantId, role: "rosia", text: "", time: nowTime() },
     ]);
-    
+
     setTyping(true);
     setAtBottom(true);
     scrollToBottom(true);
 
     try {
-      const fd = new FormData();
-      fd.append("user_input", text);
-      fd.append("target_model", "default");
-      fd.append("voice_requested", voice ? "true" : "false");
-      fd.append("conversation_id", activeConversationId || "");
+      // --- Tasks 1 & 3: Run emotion inference + URL fetching in parallel ---
+      const urls = extractUrls(sanitizedText);
 
-      if (image) {
-        const blob = await fetch(image.url).then(r => r.blob());
-        fd.append("files", blob, image.name);
+      const [emotionShift, ...urlResults] = await Promise.allSettled([
+        // Task 1: local WASM emotion inference with 2-second timeout guard
+        Promise.race([
+          calculateLocalEmotionShift(sanitizedText),
+          new Promise<{ valence_shift: number; arousal_shift: number }>((resolve) =>
+            setTimeout(() => resolve({ valence_shift: 0, arousal_shift: 0 }), 2000)
+          ),
+        ]),
+        // Task 3: parallel URL content fetches
+        ...urls.map((url) => fetchUrlContent(url)),
+      ]);
+
+      // Unpack emotion shift — fallback to zero on rejection
+      const { valence_shift, arousal_shift } =
+        emotionShift.status === "fulfilled"
+          ? emotionShift.value
+          : { valence_shift: 0, arousal_shift: 0 };
+
+      // Build system note from successfully fetched URL bodies
+      const linkSummaries: string[] = [];
+      urls.forEach((url, idx) => {
+        const result = urlResults[idx];
+        if (result?.status === "fulfilled" && result.value) {
+          linkSummaries.push(`Content from ${url}: ${result.value}`);
+        }
+      });
+
+      let finalInput = sanitizedText.trim();
+      if (linkSummaries.length > 0) {
+        finalInput +=
+          "\n\n[System Note: The user shared links containing the following text:]\n" +
+          linkSummaries.join("\n");
       }
 
-      const token = localStorage.getItem("vices_tester_token") || "";
+      // --- Task 4: Serialize active conversation history for stateless backend ---
+      const MAX_HISTORY = 12;
+      const historyPayload = messages
+        .filter((m: Message) => m.role === "user" || m.role === "rosia")
+        .slice(-MAX_HISTORY)
+        .map((m: Message) => ({
+          role: m.role === "rosia" ? "assistant" : "user",
+          content: m.text,
+        }));
+
+      const fd = new FormData();
+      fd.append("user_input", finalInput);
+      fd.append("target_model", "default");
+      fd.append("voice_requested", voice ? "true" : "false");
+      // Task 1: send client-computed emotion shifts
+      fd.append("client_valence_shift", String(valence_shift));
+      fd.append("client_arousal_shift", String(arousal_shift));
+      // Task 4: send serialized history instead of a conversation_id key
+      fd.append("client_history", JSON.stringify(historyPayload));
+
+      if (image) {
+        const blob = await fetch(image.url).then((r) => r.blob());
+        fd.append("files", blob, image.name);
+      }
 
       const res = await fetch(`${sessionUrl}/chat`, {
         method: "POST",
         body: fd,
-        headers: {
-          "ngrok-skip-browser-warning": "bypass",
-          "x-tester-token": token,
-        },
       });
 
       if (!res.ok || !res.body) throw new Error("Chat core failure");
@@ -256,9 +308,10 @@ export function ChatView({
       }
     } catch (e) {
       console.error(e);
+      const errorMsg = "\n\n*[System Error: Backend connection lost. Ensure the local server is running on port 8000.]*";
       setMessages((prev: Message[]) =>
         prev.map((x: Message) =>
-          x.id === assistantId ? { ...x, text: x.text + "\n\n*[System Error: Core Connection Lost]*" } : x
+          x.id === assistantId ? { ...x, text: x.text + errorMsg } : x
         )
       );
     } finally {
@@ -275,10 +328,7 @@ export function ChatView({
     try {
       fetch(`${sessionUrl}/feedback`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "bypass",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_input: originalPrompt,
           rejected_response: payload.response,

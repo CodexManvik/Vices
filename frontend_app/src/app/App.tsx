@@ -3,12 +3,17 @@ import { AnimatePresence, motion } from "motion/react";
 import { Gatekeeper } from "./components/Gatekeeper";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./components/ChatView";
-import { AccessRequest } from "./components/AccessRequest";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { MoodGlow } from "./components/MoodGlow";
 import ImageInspectWindow from "./components/ImageInspectWindow";
 import { AIAvatar } from "./components/AIAvatar";
 import { Message } from "./components/ChatMessage";
+import { LocalSetup } from "./components/LocalSetup";
+import { Loader2 } from "lucide-react";
+import { PersonaSetup } from "./components/PersonaSetup";
+import { PersonaConfig } from "./components/PersonaConfig";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { MemoryBrowser } from "./components/MemoryBrowser";
 
 export interface Conversation {
   id: string;
@@ -45,14 +50,119 @@ const MOOD_COLORS: Record<string, string> = {
 
 export default function App() {
   const [authorized, setAuthorized] = useState(false);
-  const [showAccessRequest, setShowAccessRequest] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [brokerUrl, setBrokerUrl] = useState<string>("");
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
+
+  // Setup gate state and checking flag
+  const [setupDone, setSetupDone] = useState(false);
+  const [isCheckingHardware, setIsCheckingHardware] = useState(true);
+  const [personaSetupDone, setPersonaSetupDone] = useState(false);
+  const [personas, setPersonas] = useState<any[]>([]);
+  const [activeCompanion, setActiveCompanion] = useState<any | null>(null);
+  const [showPersonaConfig, setShowPersonaConfig] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
+
+  // Hardware and model check on mount
+  useEffect(() => {
+    let active = true;
+    const checkSetupState = async () => {
+      try {
+        const { detectGpu } = await import("./utils/gpuDetector");
+        const { checkModelsExist } = await import("./utils/modelManager");
+
+        const gpu = await detectGpu();
+        const { anyFound } = await checkModelsExist();
+
+        if (!active) return;
+
+        if (!gpu.hasCapableGpu) {
+          // No capable GPU — bypass setup entirely, use server mode
+          localStorage.setItem("vices_setup_done", "1");
+          localStorage.setItem("vices_mode", "server");
+          setSetupDone(true);
+        } else {
+          // Has capable GPU.
+          if (anyFound) {
+            // Models found! We MUST show the "Model Found" screen.
+            setSetupDone(false);
+          } else {
+            // No models found.
+            const done = localStorage.getItem("vices_setup_done") === "1";
+            const savedMode = localStorage.getItem("vices_mode") as "local" | "server" | null;
+            if (done && savedMode === "server") {
+              setSetupDone(true);
+            } else {
+              setSetupDone(false);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Hardware scan failed, defaulting to server mode:", e);
+        setSetupDone(true);
+      } finally {
+        if (active) {
+          setIsCheckingHardware(false);
+        }
+      }
+    };
+
+    checkSetupState();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleSetupComplete = (mode: "local" | "server") => {
+    setSetupDone(true);
+    if (mode === "local") {
+      setAuthorized(true);
+      setSessionUrl("http://localhost:8000");
+    } else {
+      setAuthorized(false);
+      setSessionUrl(null);
+    }
+  };
+
+  // If local mode is active, automatically authorize the client interface
+  useEffect(() => {
+    if (setupDone && localStorage.getItem("vices_mode") === "local") {
+      setAuthorized(true);
+      setSessionUrl("http://localhost:8000");
+    }
+  }, [setupDone]);
+
+  const checkPersonaState = async (url: string | null) => {
+    if (!url) return;
+    try {
+      const baseUrl = url.replace(/\/+$/, "");
+      const res = await fetch(`${baseUrl}/personas`);
+      if (res.ok) {
+        const data = await res.json();
+        const list = data.personas || [];
+        setPersonas(list);
+        const active = list.find((p: any) => p.id === data.active_id) || null;
+        setActiveCompanion(active);
+        if (active) {
+          setPersonaSetupDone(true);
+        } else {
+          setPersonaSetupDone(false);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check persona status:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (sessionUrl) {
+      checkPersonaState(sessionUrl);
+    }
+  }, [sessionUrl]);
 
   const [status, setStatus] = useState({ chemistry: 50, mood: "neutral", tone: "casual" });
   const [typing, setTyping] = useState(false);
@@ -155,6 +265,15 @@ export default function App() {
   useEffect(() => {
     if (!sessionUrl) return;
 
+    if (sessionUrl === "local") {
+      setStatus({
+        chemistry: 100,
+        mood: "warm",
+        tone: "casual",
+      });
+      return;
+    }
+
     const baseUrl = sessionUrl.replace(/\/+$/, "");
     const statusUrl = `${baseUrl}/status`;
     const statusStreamUrl = `${baseUrl}/status/stream`;
@@ -170,9 +289,7 @@ export default function App() {
 
     const fetchStatus = async () => {
       try {
-        const res = await fetch(statusUrl, {
-          headers: { "ngrok-skip-browser-warning": "bypass" },
-        });
+        const res = await fetch(statusUrl);
         if (res.ok) {
           const data = await res.json();
           updateStatus(data);
@@ -288,6 +405,26 @@ export default function App() {
   // Curated mood colors for the intimate view text accent
   const currentMoodColor = MOOD_COLORS[status.mood?.toLowerCase()] || "#38BDF8";
 
+  if (isCheckingHardware) {
+    return (
+      <div
+        className="w-full h-full min-h-screen flex items-center justify-center"
+        style={{
+          background: isDark ? "#060606" : "#FAFAF9",
+          color: isDark ? "#E2E8F0" : "#1C1917",
+          fontFamily: "'Inter', sans-serif",
+        }}
+      >
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+        >
+          <Loader2 size={24} style={{ color: isDark ? "#52525B" : "#A8A29E" }} />
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="relative h-screen w-full overflow-hidden flex flex-col transition-colors duration-500"
@@ -299,20 +436,38 @@ export default function App() {
     >
       <div className="flex-1 relative min-h-0">
         <AnimatePresence mode="wait">
-          {showAdminPanel ? (
+          {!setupDone ? (
+            <motion.div
+              key="setup"
+              exit={{ opacity: 0, scale: 0.98, filter: "blur(6px)" }}
+              transition={{ duration: 0.5 }}
+              className="w-full h-full"
+            >
+              <LocalSetup isDark={isDark} onComplete={handleSetupComplete} />
+            </motion.div>
+          ) : !personaSetupDone ? (
+            <motion.div
+              key="persona-setup"
+              exit={{ opacity: 0, scale: 0.98, filter: "blur(6px)" }}
+              transition={{ duration: 0.5 }}
+              className="w-full h-full"
+            >
+              <PersonaSetup
+                isDark={isDark}
+                sessionUrl={sessionUrl}
+                onComplete={() => {
+                  if (sessionUrl) checkPersonaState(sessionUrl);
+                }}
+              />
+            </motion.div>
+          ) : showAdminPanel ? (
             <motion.div key="admin" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
               <AdminDashboard isDark={isDark} onBack={() => setShowAdminPanel(false)} sessionUrl={sessionUrl} />
             </motion.div>
           ) : !authorized ? (
-            showAccessRequest ? (
-              <motion.div key="access-request" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
-                <AccessRequest isDark={isDark} onBack={() => setShowAccessRequest(false)} brokerUrl={brokerUrl} />
-              </motion.div>
-            ) : (
-              <motion.div key="gate" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
-                <Gatekeeper onAuthorized={handleAuthorized} onRequestAccess={() => setShowAccessRequest(true)} onBrokerUrlSet={(url) => setBrokerUrl(url)} isDark={isDark} />
-              </motion.div>
-            )
+            <motion.div key="gate" exit={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }} transition={{ duration: 0.6 }} className="w-full h-full">
+              <Gatekeeper onAuthorized={handleAuthorized} isDark={isDark} />
+            </motion.div>
           ) : (
             <motion.div key="app" initial={{ opacity: 0, scale: 1.01 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.7, ease: "easeOut" }} className="w-full h-full flex">
               {isSidebarOpen ? (
@@ -329,6 +484,10 @@ export default function App() {
                     onDeleteConversation={handleDeleteConversation}
                     typing={typing}
                     audioAnalyser={audioAnalyser}
+                    activeCompanionName={activeCompanion?.name || "Rosia"}
+                    onConfigurePersona={() => setShowPersonaConfig(true)}
+                    onShowSettings={() => setShowSettings(true)}
+                    onShowMemory={() => setShowMemory(true)}
                   />
                 </div>
               ) : (
@@ -363,7 +522,7 @@ export default function App() {
                           color: isDark ? "#E2E8F0" : "#1C1917",
                         }}
                       >
-                        Rosia Core
+                        {activeCompanion?.name || "Rosia"} Core
                       </h3>
                       <p
                         style={{
@@ -423,6 +582,37 @@ export default function App() {
         {/* Floating Sub Window Inspection Canvas Overlay */}
         {activePreviewImage && (
           <ImageInspectWindow imageUrl={activePreviewImage} onClose={() => setActivePreviewImage(null)} />
+        )}
+
+        {/* Configure Persona Management overlay */}
+        {showPersonaConfig && (
+          <PersonaConfig
+            isDark={isDark}
+            sessionUrl={sessionUrl}
+            onClose={() => setShowPersonaConfig(false)}
+            onActiveChanged={() => {
+              if (sessionUrl) checkPersonaState(sessionUrl);
+            }}
+          />
+        )}
+
+        {/* Advanced Settings Config Panel overlay */}
+        {showSettings && (
+          <SettingsPanel
+            isDark={isDark}
+            sessionUrl={sessionUrl}
+            onClose={() => setShowSettings(false)}
+            conversations={conversations}
+          />
+        )}
+
+        {/* Memory Diagnostics Browser overlay */}
+        {showMemory && (
+          <MemoryBrowser
+            isDark={isDark}
+            sessionUrl={sessionUrl}
+            onClose={() => setShowMemory(false)}
+          />
         )}
       </div>
     </div>
