@@ -60,6 +60,27 @@ DEFAULT_PERMISSIONS = {
             "reg delete",
             "icacls",
         ],
+        # Interpreter/shell-metacharacter guard. Even an allowlisted command
+        # (e.g. "python", "git") becomes arbitrary code execution once these
+        # appear, so they are rejected regardless of the allowlist. This closes
+        # the `python -c "..."` sandbox escape.
+        "forbidden_arguments": [
+            "-c",
+            "-e",
+            "-m",
+            "--exec",
+            "-command",
+            "-encodedcommand",
+            "|",
+            ";",
+            "&&",
+            "&",
+            "`",
+            "$(",
+            ">",
+            ">>",
+            "<",
+        ],
     },
     "browser": {
         "allowed_domains": ["*"],
@@ -76,6 +97,7 @@ class FilesystemPermissions(BaseModel):
 class ShellPermissions(BaseModel):
     allowed_commands: List[str] = Field(default_factory=list)
     forbidden_patterns: List[str] = Field(default_factory=list)
+    forbidden_arguments: List[str] = Field(default_factory=list)
 
 
 class BrowserPermissions(BaseModel):
@@ -181,6 +203,26 @@ def is_command_allowed(command: str) -> Tuple[bool, str]:
     for pat in manifest.shell.forbidden_patterns:
         if pat.lower() in cmd_lower:
             return False, f"Command contains forbidden pattern '{pat}'"
+
+    # 1b. Check forbidden arguments / shell metacharacters. These turn an
+    # otherwise-allowlisted binary into arbitrary code execution or chained
+    # commands, so they are rejected before the allowlist is even consulted.
+    # Fall back to the default list when an older manifest on disk predates
+    # this field, so existing installs stay protected without editing YAML.
+    forbidden_args = (
+        manifest.shell.forbidden_arguments
+        or DEFAULT_PERMISSIONS["shell"]["forbidden_arguments"]
+    )
+    tokens = cmd_lower.split()
+    for bad in forbidden_args:
+        bad_lower = bad.lower()
+        # Exact-token match for flag-style args (-c, -m, …); substring match
+        # for metacharacters that need no surrounding whitespace (|, ;, $(, …).
+        if bad_lower.startswith("-") or bad_lower.startswith("--"):
+            if bad_lower in tokens:
+                return False, f"Command contains forbidden argument '{bad}'"
+        elif bad_lower in cmd_lower:
+            return False, f"Command contains forbidden shell operator '{bad}'"
 
     # 2. Check wildcard
     if "*" in manifest.shell.allowed_commands:

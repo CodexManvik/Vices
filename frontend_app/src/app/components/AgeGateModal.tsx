@@ -2,7 +2,7 @@
  * AgeGateModal.tsx
  *
  * A modal overlay that requests the user to confirm they are 18+ before
- * enabling NSFW/uncensored features. Verification state is persisted in
+ * enabling uncensored model features. Verification state is persisted in
  * localStorage so it only needs to happen once per device.
  *
  * Usage:
@@ -11,11 +11,11 @@
  *   // In JSX:
  *   <AgeGateModal />
  *
- *   // When NSFW toggle is clicked:
+ *   // When uncensored toggle is clicked:
  *   if (!isAdultVerified) {
- *     requestVerification(() => setNsfw(true));
+ *     requestVerification(() => setUncensored(true));
  *   } else {
- *     setNsfw(true);
+ *     setUncensored(true);
  *   }
  */
 
@@ -38,7 +38,7 @@ export function useAgeGate() {
     localStorage.getItem(AGE_VERIFIED_KEY) === "true";
 
   /**
-   * Call this when the user tries to enable an NSFW feature.
+   * Call this when the user tries to enable an uncensored feature.
    * If already verified, runs the callback immediately.
    * If not verified, opens the modal. On success, sets verification
    * in localStorage and runs the callback.
@@ -237,9 +237,8 @@ export function AgeGateModal({
                   marginBottom: "20px",
                 }}
               >
-                Enabling this feature downloads the uncensored Gemma-4 model and
-                unlocks adult/explicit roleplay content. This content is intended
-                strictly for adults.
+                Enabling this feature downloads and activates uncensored AI models
+                (e.g., Gemma-4 Uncensored). Verification is required to access uncensored model weights.
               </p>
 
               {/* Confirmation checkbox */}
@@ -302,14 +301,14 @@ export function AgeGateModal({
                 />
                 <span
                   style={{
-                    fontSize: "13px",
+                    fontSize: "13.3px",
                     color: text,
                     lineHeight: 1.5,
                   }}
                 >
                   I confirm that I am{" "}
                   <strong style={{ color: accent }}>18 years of age or older</strong>{" "}
-                  and I consent to accessing adult content. I understand this
+                  and consent to downloading and using uncensored models. I understand this
                   setting is stored on this device only.
                 </span>
               </label>

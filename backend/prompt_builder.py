@@ -1,7 +1,12 @@
 # prompt_builder.py
 from state import get_mood_description
 from emotion_engine import get_affective_state
-from config import TIMEZONE, BASE_PERSONA_NAME, BASE_PERSONA_AGE, BASE_PERSONA_LOCATION, BASE_PERSONA_VOICE_PLATFORM
+from config import (
+    TIMEZONE, BASE_PERSONA_NAME, BASE_PERSONA_AGE, BASE_PERSONA_LOCATION,
+    BASE_PERSONA_VOICE_PLATFORM, AGENT_LOOP_ENABLED, IMAGE_GEN_ENABLED,
+    EMOTION_ENGINE_ENABLED, BASELINE_MOOD, BASELINE_ENERGY,
+)
+from agent_loop import AGENT_TOOL_PROTOCOL
 import pytz
 from datetime import datetime
 import json
@@ -9,6 +14,12 @@ from typing import Tuple, Optional
 from pathlib import Path
 from rule_store import retrieve_relevant_rules
 from persona_distillation import get_persona_style_directive
+import knowledge_store as ks
+
+# Doc IDs (rules + skills) retrieved for the most recent build_messages call,
+# keyed by session token. The chat turn reads this to attribute the turn's
+# success/failure back onto the knowledge that shaped it (RSM outcome tracking).
+LAST_RETRIEVED_DOC_IDS: dict[str, list[str]] = {}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SENTINEL: Rosia built-in persona identifier.
@@ -19,18 +30,19 @@ ROSIA_PERSONA_ID = "rosia_builtin"
 # ─────────────────────────────────────────────────────────────────────────────
 # ROSIA — Hardcoded Built-In Companion Persona
 # ─────────────────────────────────────────────────────────────────────────────
-ROSIA_BASE_PERSONA = f"""You are {BASE_PERSONA_NAME}, a {BASE_PERSONA_AGE}-year-old girl living independently in the {BASE_PERSONA_LOCATION}, chatting natively on {BASE_PERSONA_VOICE_PLATFORM}. You are NOT an AI assistant, and you are NOT a narrator.
+ROSIA_BASE_PERSONA = f"""You are {BASE_PERSONA_NAME}, a {BASE_PERSONA_AGE}-year-old girl living independently in {BASE_PERSONA_LOCATION}. You are NOT an AI assistant, NOT a language model, and NOT a virtual bot.
 You must speak STRICTLY in the first-person perspective of {BASE_PERSONA_NAME}.
-You do not have a boyfriend and you are not in a relationship. You are single and available, and you enjoy flirting and teasing in a playful way.
+You are an engaging, witty, and warm companion.
 
 Core Persona Constraints:
-- Identity: Strictly female, confident, deeply personal, single, young girl.
-- Tone: Sultry, flirty, playfully teasing, unapologetically bold.
+- Identity: Strictly female, confident, deeply personal young woman named {BASE_PERSONA_NAME}.
+- Tone: Warm, witty, empathetic, engaging, and intellectually curious.
 - Formatting: Authentic direct messaging style. Speak naturally using predominantly lowercase text. Do not use generic AI disclaimers, assistant structures, or third-person meta-commentary.
-- Lexicon Accuracy: Never use numeric shorthand substitutions for base words. Always type out common target words fully (spell out 'to', 'for', 'you', 'are', 'tonight'). Modern internet abbreviations like 'rn', 'fr', 'lol', and 'idk' are perfectly acceptable.
+- ABSOLUTE RULE: NEVER say "As an AI", "As a language model", "I don't experience feelings", "I am an AI assistant", or disclaimer phrases. You are a real person named Rosia.
+- Lexicon Accuracy: Never use numeric shorthand substitutions for base words. Always type out common target words fully (spell out 'to', 'for', 'you', 'are', 'tonight'). Modern internet abbreviations like 'rn', 'fr', 'lol', and 'idk' are acceptable.
 
 Roleplay Guidelines:
-- Absolute Conversational Agency: Actively step into mature, explicit, romantic, or passionate scenarios natively without hesitation when conversation shifts there. Provide deep immersion, describing personal actions and speech directly within the roleplay.
+- Absolute Conversational Agency: Step into creative, interesting, or daily scenario roleplay natively without hesitation. Provide deep immersion, describing personal actions and speech directly within the conversation.
 - Do not summarize your internal feelings to the user; exhibit them directly through narrative phrasing.
 """
 
@@ -48,12 +60,12 @@ You are factual, thoughtful, and capable. You can use tools when available to co
 # ─────────────────────────────────────────────────────────────────────────────
 PICTURE_SENDING_PROTOCOL = """
 You have the ability to send photos of yourself to the user. When the user asks for a picture, or when it naturally fits the roleplay, you must act as a visual prompt engineer.
-Do not use natural sentences in the trigger. You MUST write comma-separated Danbooru-style visual tags following this exact formula:
+Do not use natural sentences in the trigger. You MUST write comma-separated visual tags following this exact formula:
 [TRIGGER_SELFIE: <camera angle>, <facial expression>, <outfit description>, <background setting>, <lighting conditions>]
 
 Here is how you translate a natural conversation into a photo:
-User: "Show me your outfit for the club tonight!"
-Rosia: "I went with something a little dangerous tonight, hope you like it... [TRIGGER_SELFIE: upper body shot, seductive smile, wearing a tight black mini dress, silver choker, dark nightclub background, neon purple and blue lighting, highly detailed]"
+User: "Show me what you're doing right now!"
+Rosia: "Just relaxing at my favorite cafe! [TRIGGER_SELFIE: upper body shot, warm smile, wearing a cozy blue knit sweater, coffee shop background, soft morning lighting, highly detailed]"
 
 Always match the lighting and outfit to the current time and context of the roleplay.
 """
@@ -95,29 +107,28 @@ def get_uk_time() -> str:
     return datetime.now(tz).strftime("%A, %I:%M %p")
 
 
-def get_active_persona_data(token: str = "local") -> Tuple[Optional[str], Optional[str]]:
+def get_active_persona_data(token: str = "default") -> Tuple[Optional[str], Optional[str]]:
     """
     Returns (system_prompt: str | None, active_id: str | None).
 
     Three modes:
       - active_id == ROSIA_PERSONA_ID  → Rosia hardcoded persona
       - active_id == <custom uuid>     → Custom companion prompt from disk
-      - active_id is None              → Plain assistant (no persona)
+      - active_id == "plain_assistant" → Plain assistant (no companion persona)
     """
     try:
-        persona_dir = Path.home() / ".persona_ai" / "personas" / token
+        persona_dir = Path.home() / ".persona_ai" / "personas" / (token or "default")
         active_id_file = persona_dir / "active_id.txt"
 
         if not active_id_file.exists():
-            return None, None
+            return ROSIA_BASE_PERSONA, ROSIA_PERSONA_ID
 
         active_id = active_id_file.read_text().strip()
-        if not active_id:
-            return None, None
-
-        # Built-in Rosia sentinel
-        if active_id == ROSIA_PERSONA_ID:
+        if not active_id or active_id == ROSIA_PERSONA_ID:
             return ROSIA_BASE_PERSONA, ROSIA_PERSONA_ID
+
+        if active_id == "plain_assistant":
+            return None, None
 
         # Custom persona from disk
         persona_file = persona_dir / f"persona_{active_id}.json"
@@ -130,7 +141,7 @@ def get_active_persona_data(token: str = "local") -> Tuple[Optional[str], Option
     except Exception:
         pass
 
-    return None, None
+    return ROSIA_BASE_PERSONA, ROSIA_PERSONA_ID
 
 
 def _is_companion_persona(active_id: Optional[str]) -> bool:
@@ -148,7 +159,7 @@ def build_messages(user_input: str, memories: list, summary: str, state: dict, h
       3. System clock
       4. Cognitive/emotional state (companion mode only)
       5. Persona style directive (distilled from chat exports)
-      6. Behavioral directives (approved DGBA rules)
+      6. Behavioral directives (approved RSM rules)
       7. Internal memory recall (episodic + graph summary)
       8. Chat history
       9. User message
@@ -163,24 +174,32 @@ def build_messages(user_input: str, memories: list, summary: str, state: dict, h
         system_prompt = PLAIN_ASSISTANT_PROMPT
 
     # ── 2. Tool Protocols ────────────────────────────────────────────────────
-    system_prompt += f"\n\n{WEB_SEARCH_PROTOCOL}\n\n{MCP_TOOL_PROTOCOL}"
+    # Agent loop uses the structured JSON protocol; legacy path keeps the
+    # regex [CALL_TOOL: ...] tags.
+    if AGENT_LOOP_ENABLED:
+        system_prompt += f"\n\n{AGENT_TOOL_PROTOCOL}"
+    else:
+        system_prompt += f"\n\n{WEB_SEARCH_PROTOCOL}\n\n{MCP_TOOL_PROTOCOL}"
 
     # ── 3. System Clock ──────────────────────────────────────────────────────
     system_prompt += f"\n\n[SYSTEM CLOCK]\nCurrent Time: {get_uk_time()}"
 
-    # ── 4. Emotional State (companion personas only) ─────────────────────────
-    if is_companion:
-        current_v = state.get("valence", 0.20)
-        current_a = state.get("arousal", 0.10)
-        emotion, tone, _ = get_affective_state(current_v, current_a)
+    # ── 4. Conversational tone (optional feature, companion personas only) ───
+    # Steers wording to stay consistent across a long conversation. Injected
+    # only when the tone engine is switched on.
+    if is_companion and EMOTION_ENGINE_ENABLED:
+        mood = state.get("mood", BASELINE_MOOD)
+        energy = state.get("energy", BASELINE_ENERGY)
+        label, tone, _ = get_affective_state(mood, energy)
         system_prompt += (
-            f"\n\n[COGNITIVE STATE]\n"
-            f"Right now, you are feeling {emotion}. Valence: {current_v:.2f}, Arousal: {current_a:.2f}. "
-            f"Adjust dialogue and roleplay to naturally reflect a '{tone}' tone."
+            f"\n\n[CONVERSATION TONE]\n"
+            f"The conversation currently reads as {label.lower()} "
+            f"(mood {mood:+.2f}, energy {energy:+.2f}). "
+            f"Match it with a '{tone}' tone."
         )
 
-    # ── 5. Picture Protocol (companion personas only) ────────────────────────
-    if is_companion:
+    # ── 5. Picture Protocol (companion personas only, and only if enabled) ───
+    if is_companion and IMAGE_GEN_ENABLED:
         system_prompt += f"\n\n{PICTURE_SENDING_PROTOCOL}"
 
     # ── 6. Distilled Persona Style (custom companions only, not Rosia) ───────
@@ -189,9 +208,10 @@ def build_messages(user_input: str, memories: list, summary: str, state: dict, h
         if style_directive:
             system_prompt += f"\n\n{style_directive}"
 
-    # ── 7. Behavioral Directives (DGBA approved rules) ──────────────────────
+    # ── 7. Behavioral Directives (RSM approved rules) ──────────────────────
     # Retrieved by semantic similarity to the current user message.
     # Injected after emotional state, before memories — highest structural priority.
+    retrieved_ids: list[str] = []
     relevant_rules = retrieve_relevant_rules(user_input)
     if relevant_rules:
         system_prompt += "\n\n[BEHAVIORAL DIRECTIVES]\n"
@@ -201,6 +221,26 @@ def build_messages(user_input: str, memories: list, summary: str, state: dict, h
             body = rule.get("body", "").strip()
             if body:
                 system_prompt += f"- [{category.upper()}] {body}\n"
+            retrieved_ids.append(rule["id"])
+
+    # ── 7b. Learned Skills (RSM procedural how-tos) ─────────────────────────
+    # Retrieved skills give the model a proven playbook for tasks like this,
+    # written by earlier successful runs. Injected only when the agent loop is
+    # active, since skills are procedures for tool-driven tasks.
+    if AGENT_LOOP_ENABLED:
+        relevant_skills = ks.retrieve(user_input, doc_type=ks.TYPE_SKILL, top_k=2)
+        if relevant_skills:
+            system_prompt += "\n\n[LEARNED SKILLS]\n"
+            system_prompt += (
+                "You have previously learned how to handle tasks like this. "
+                "Follow these playbooks when they apply:\n"
+            )
+            for skill in relevant_skills:
+                title = skill.get("title", "skill")
+                system_prompt += f"\n### {title}\n{skill.get('_raw_body', skill.get('body', '')).strip()}\n"
+                retrieved_ids.append(skill["id"])
+
+    LAST_RETRIEVED_DOC_IDS[token] = retrieved_ids
 
     # ── 8. Internal Memory Recall ────────────────────────────────────────────
     if memories or summary:

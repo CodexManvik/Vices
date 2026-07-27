@@ -1,54 +1,82 @@
 import json
+import os
+from pathlib import Path
 import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer
 from turbovec import IdMapIndex
-from config import TV_INDEX_PATH, METADATA_PATH, CLASSIFIED_MEMORIES_PATH, EMBEDDING_MODEL, TURBOVEC_BIT_WIDTH
+from config import TV_INDEX_PATH, METADATA_PATH, CLASSIFIED_MEMORIES_PATH, PERSONALITY_DATASET_PATH, EMBEDDING_MODEL, TURBOVEC_BIT_WIDTH
 
-print("[MEMORY BUILDER] Initializing sentence-transformer core...")
-model = SentenceTransformer(EMBEDDING_MODEL)
+BACKEND_DIR = Path(__file__).parent
 
-with open(CLASSIFIED_MEMORIES_PATH, "r", encoding="utf-8") as f:
+def resolve_path(p_str: str) -> Path:
+    p = Path(p_str)
+    if p.is_absolute() and p.exists():
+        return p
+    p_backend = BACKEND_DIR / p
+    if p_backend.exists():
+        return p_backend
+    clean_parts = [part for part in p.parts if part != "backend"]
+    p_stripped = BACKEND_DIR / Path(*clean_parts)
+    if p_stripped.exists():
+        return p_stripped
+    return p_backend
+
+source_path = resolve_path(CLASSIFIED_MEMORIES_PATH)
+if not source_path.exists():
+    fallback_path = resolve_path(PERSONALITY_DATASET_PATH)
+    if fallback_path.exists():
+        print(f"[MEMORY BUILDER] '{source_path}' not found. Using dataset fallback '{fallback_path}'...")
+        source_path = fallback_path
+    else:
+        raise FileNotFoundError(f"Neither classified memories ({source_path}) nor personality dataset ({fallback_path}) could be found.")
+
+tv_index_target = str(resolve_path(TV_INDEX_PATH))
+metadata_target = str(resolve_path(METADATA_PATH))
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[MEMORY BUILDER] Loading memory source from: {source_path}")
+print(f"[MEMORY BUILDER] Initializing sentence-transformer core on {device.upper()}...")
+model = SentenceTransformer(EMBEDDING_MODEL, device=device)
+
+with open(source_path, "r", encoding="utf-8") as f:
     data = json.load(f)
 
-vectors = []
-ids = []
+abstractions = []
+valid_ids = []
 metadata_lookup = {}
 
-print(f"[MEMORY BUILDER] Vectorizing {len(data)} memories...")
 for i, item in enumerate(data):
-    text = item["text"]
-    tags = item["tags"]
+    if isinstance(item, str):
+        text = item
+        tags = ["conversation"]
+    else:
+        text = item.get("text", "")
+        tags = item.get("tags", ["conversation"])
 
-    # Recreate semantic abstraction string
-    abstraction = (
-        f"Conversation style example. "
-        f"Tone: {', '.join(tags)}. "
-        f"Message: {text}"
-    )
+    if not text:
+        continue
 
-    # Encode array to float32
-    embedding = model.encode(abstraction).astype(np.float32)
-    vectors.append(embedding)
-    ids.append(i)
-    
-    # Store parallel text references in sidecar map
+    abstraction = f"Conversation style example. Tone: {', '.join(tags)}. Message: {text}"
+    abstractions.append(abstraction)
+    valid_ids.append(i)
+
     metadata_lookup[str(i)] = {
         "raw_text": text,
         "tags": tags
     }
 
-# Pack data structures for hardware kernel execution
-vectors_np = np.vstack(vectors)
-ids_np = np.array(ids, dtype=np.uint64)
+print(f"[MEMORY BUILDER] Batch vectorizing {len(abstractions)} memories on GPU (batch_size=256)...")
+vectors = model.encode(abstractions, batch_size=256, show_progress_bar=True, convert_to_numpy=True).astype(np.float32)
+ids_np = np.array(valid_ids, dtype=np.uint64)
 
 print("[MEMORY BUILDER] Committing arrays to TurboQuant layout...")
-# Bit-width configured via TURBOVEC_BIT_WIDTH provides optimal lexical accuracy for semantic recall
 idx = IdMapIndex(bit_width=TURBOVEC_BIT_WIDTH)
-idx.add_with_ids(vectors_np, ids_np)
+idx.add_with_ids(vectors, ids_np)
 
-# Persist files locally
-idx.write(TV_INDEX_PATH)
-with open(METADATA_PATH, "w", encoding="utf-8") as f:
+os.makedirs(os.path.dirname(tv_index_target), exist_ok=True)
+idx.write(tv_index_target)
+with open(metadata_target, "w", encoding="utf-8") as f:
     json.dump(metadata_lookup, f, indent=4)
 
-print(f"🎉 Success! Turbovec index written to '{TV_INDEX_PATH}' and lookup map to '{METADATA_PATH}'.")
+print(f"Success! Turbovec index written to '{tv_index_target}' and lookup map to '{metadata_target}'.")

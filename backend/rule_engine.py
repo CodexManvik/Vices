@@ -34,6 +34,10 @@ from config import (
     RULE_ENGINE_REFLECTION_TEMPERATURE,
 )
 from rule_store import insert_rule, get_all_rules
+import knowledge_store as ks
+
+# Cosine similarity above which a distilled rule counts as one we already have.
+RULE_DUPLICATE_THRESHOLD = 0.90
 
 # ─────────────────────────────────────────────
 # Valid values for schema enforcement
@@ -128,6 +132,26 @@ async def run_consolidation_pass(
         validation_error = _validate_rule(rule_data)
         if validation_error:
             continue  # silently discard malformed rules
+
+        # Skip near-duplicates of rules we already hold (the reflection prompt
+        # asks the model not to repeat itself, but small models often do).
+        # Rediscovering a rule is evidence it matters, so reinforce instead.
+        try:
+            dup = ks.find_duplicate(
+                ks.rule_embed_text(
+                    body=rule_data["body"],
+                    rationale=rule_data["rationale"],
+                    ex_before=rule_data.get("example_before", ""),
+                    ex_after=rule_data.get("example_after", ""),
+                ),
+                doc_type=ks.TYPE_RULE,
+                threshold=RULE_DUPLICATE_THRESHOLD,
+            )
+        except Exception:
+            dup = None
+        if dup:
+            ks.reinforce(dup["id"])
+            continue
 
         rule_id = insert_rule(
             category=rule_data["category"],

@@ -1,7 +1,7 @@
 /**
  * RuleReviewPanel.tsx
  *
- * Human-in-the-Loop Review Interface for Document-Grounded Behavioral Adaptation (DGBA).
+ * Human-in-the-Loop Review Interface for Reflective Skill Memory (RSM).
  * Displays quarantined behavioral rules generated during meta-cognitive consolidation passes,
  * allowing admins to review, edit, approve, reject, or deprecate directives.
  */
@@ -279,7 +279,7 @@ export function RuleReviewPanel({ isDark, sessionUrl, adminPassword }: RuleRevie
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-semibold tracking-tight" style={{ color: textPrimary }}>
-                  DGBA Rule Engine
+                  RSM Rule Engine
                 </h2>
                 <span
                   className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-medium uppercase tracking-wider"

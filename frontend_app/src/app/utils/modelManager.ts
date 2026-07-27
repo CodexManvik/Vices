@@ -13,7 +13,7 @@ const IS_TAURI = typeof window !== "undefined" && "__TAURI__" in window;
 
 // ─── Model registry ──────────────────────────────────────────────────────────
 
-export const NSFW_MODEL_FILES = [
+export const UNCENSORED_MODEL_FILES = [
   {
     id: "main" as const,
     label: "Gemma-4 Uncensored Model",
@@ -48,7 +48,7 @@ export const SAFE_MODEL_FILES = [
 ] as const;
 
 // Keep alias to avoid breaking static type definitions elsewhere
-export const MODEL_FILES = NSFW_MODEL_FILES;
+export const MODEL_FILES = UNCENSORED_MODEL_FILES;
 
 // ─── Path resolution ─────────────────────────────────────────────────────────
 
@@ -84,13 +84,13 @@ export async function scanForModels(): Promise<string[]> {
 }
 
 /**
- * Structural check indicating presence of NSFW or Safe models
+ * Structural check indicating presence of Uncensored or Safe models
  */
-export async function checkModelsExist(): Promise<{ nsfwFound: boolean; safeFound: boolean; anyFound: boolean }> {
+export async function checkModelsExist(): Promise<{ uncensoredFound: boolean; safeFound: boolean; anyFound: boolean }> {
   const files = await scanForModels();
-  const nsfwFound = files.includes(NSFW_MODEL_FILES[0].filename) && files.includes(NSFW_MODEL_FILES[1].filename);
+  const uncensoredFound = files.includes(UNCENSORED_MODEL_FILES[0].filename) && files.includes(UNCENSORED_MODEL_FILES[1].filename);
   const safeFound = files.includes(SAFE_MODEL_FILES[0].filename) && files.includes(SAFE_MODEL_FILES[1].filename);
-  return { nsfwFound, safeFound, anyFound: nsfwFound || safeFound };
+  return { uncensoredFound, safeFound, anyFound: uncensoredFound || safeFound };
 }
 
 export interface DownloadProgress {
@@ -109,7 +109,7 @@ export interface DownloadProgress {
  * Abortable via AbortSignal — partial files are cleaned up on cancellation.
  */
 export async function* downloadAllModels(
-  nsfw: boolean,
+  uncensored: boolean,
   signal: AbortSignal
 ): AsyncGenerator<DownloadProgress> {
   if (!IS_TAURI) {
@@ -129,7 +129,7 @@ export async function* downloadAllModels(
     await mkdir(modelsDir, { recursive: true });
   }
 
-  const modelsToDownload = nsfw ? NSFW_MODEL_FILES : SAFE_MODEL_FILES;
+  const modelsToDownload = uncensored ? UNCENSORED_MODEL_FILES : SAFE_MODEL_FILES;
 
   for (let i = 0; i < modelsToDownload.length; i++) {
     const model = modelsToDownload[i];

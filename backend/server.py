@@ -1,5 +1,5 @@
 # server.py
-from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,7 +11,16 @@ import re
 from pathlib import Path
 from pydantic import BaseModel, Field
 import json
-from duckduckgo_search import DDGS
+# Web search backend. The `duckduckgo_search` package was renamed to `ddgs`;
+# the old one still imports but silently returns zero results, which makes the
+# agent think its own tool is broken. Prefer ddgs, fall back, then degrade.
+try:
+    from ddgs import DDGS
+except ImportError:  # pragma: no cover - legacy installs
+    try:
+        from duckduckgo_search import DDGS
+    except ImportError:
+        DDGS = None
 from datetime import datetime
 import pytz
 import uuid
@@ -22,15 +31,17 @@ import httpx
 # --- CONFIGURATION IMPORTS ---
 from config import (
     CORS_ALLOW_ORIGINS, CORS_ALLOW_METHODS, CORS_ALLOW_HEADERS, VIDEO_RECORDING_MODE,
+    IMAGE_GEN_ENABLED,
     CURRENT_RUNTIME_TUNNEL, WEB_SEARCH_MAX_RESULTS,
-    TEMP_IMAGE_DIR, ADMIN_PASSWORD,
+    TEMP_IMAGE_DIR, ADMIN_PASSWORD, AGENT_LOOP_ENABLED,
 )
 
 # Single-user local session constant — no tester tokens or broker required.
 LOCAL_SESSION_TOKEN = "local"
 
 # --- VOICE INTEGRATION ---
-import edge_tts
+import tts_engine
+import stt_engine
 
 # Local Subsystem Integration
 from memory import retrieve_memories
@@ -39,9 +50,9 @@ from generation import generate_stream, get_available_models, switch_active_mode
 from state import state, update_state, set_active_model
 from graph_memory import extract_entities_and_update, get_graph_context
 from media_handler import extract_frames
-from image_generator import generate_selfie
+from image_generator import generate_selfie_with_handoff
 
-# Rule Engine (DGBA — Document-Grounded Behavioral Adaptation)
+# Rule Engine (RSM — Reflective Skill Memory)
 from rule_engine import ConsolidationScheduler
 from rule_store import (
     get_quarantined_rules,
@@ -58,11 +69,18 @@ from rule_store import (
 import permission_manifest
 import transaction_log
 import mcp_executor
+from agent_loop import run_agent_loop
+from agent_loop import AGENT_MAX_STEPS
+import knowledge_store as ks
+from skill_engine import maybe_write_skill
+import prompt_builder
 import persona_distillation
 import eval_harness
 
 # Cognitive Emotion Engine
-from emotion_engine import calculate_text_delta, get_affective_state, BASELINE_VALENCE, BASELINE_AROUSAL
+from emotion_engine import calculate_text_delta, get_affective_state
+from config import BASELINE_MOOD, BASELINE_ENERGY, EMOTION_ENGINE_ENABLED, EMOTION_DECAY_RATE
+from prompt_builder import ROSIA_PERSONA_ID
 
 # UI Terminal Formatting
 from rich.console import Console
@@ -72,7 +90,21 @@ from rich.panel import Panel
 # APP INIT
 # ==========================================
 
-app = FastAPI()
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    # Startup: kick off background services. Names resolve at call time, so the
+    # handlers defined later in the module are available here.
+    asyncio.create_task(chronos_loop())
+    asyncio.create_task(_warm_start_models())
+    asyncio.create_task(_warm_start_speech())
+    yield
+    # Shutdown: nothing to tear down explicitly (llama-server has its own atexit).
+
+
+app = FastAPI(lifespan=_lifespan)
 chat_lock = asyncio.Lock()
 console = Console()
 last_interaction_time = datetime.now()
@@ -117,6 +149,36 @@ rule_scheduler = ConsolidationScheduler()
 # SSE queue for rule quarantine notifications to the frontend.
 RULE_NOTIFICATION_SUBSCRIBERS: List[asyncio.Queue] = []
 
+# Per-session record of which knowledge docs (rules/skills) shaped the last
+# turn, so a /feedback thumbs-down can retroactively mark them as a failure.
+_LAST_TURN_DOCS: dict[str, list[str]] = {}
+
+
+async def _reflect_and_write_skill(
+    user_input: str,
+    tool_calls: list,
+    succeeded: bool,
+    session_id: str,
+) -> None:
+    """Background: distill a reusable skill from a completed tool-using turn."""
+    try:
+        skill_id = await maybe_write_skill(
+            user_request=user_input,
+            tool_calls=tool_calls,
+            succeeded=succeeded,
+            source_interaction_id=session_id,
+        )
+    except Exception:
+        return
+    if not skill_id:
+        return
+    payload = json.dumps({"type": "skill_quarantined", "count": 1})
+    for sub in RULE_NOTIFICATION_SUBSCRIBERS.copy():
+        try:
+            sub.put_nowait(payload)
+        except Exception:
+            continue
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGINS,
@@ -160,16 +222,18 @@ def verify_admin_password(password: str) -> bool:
 
 
 def get_status_payload() -> dict:
-    current_v = state.get("valence", BASELINE_VALENCE)
-    current_a = state.get("arousal", BASELINE_AROUSAL)
+    mood = state.get("mood", BASELINE_MOOD)
+    energy = state.get("energy", BASELINE_ENERGY)
     count = state.get("interaction_count", 0)
-    chemistry = min(100, 50 + (count * 2))
-    emotion, tone, depth = get_affective_state(current_v, current_a)
+    label, tone, depth = get_affective_state(mood, energy)
     return {
-        "chemistry": chemistry,
-        "mood": emotion.lower(),
+        "tone_enabled": EMOTION_ENGINE_ENABLED,
+        "mood": label.lower(),
         "tone": tone,
         "depth": depth,
+        "mood_value": round(mood, 3),
+        "energy_value": round(energy, 3),
+        "turns": count,
     }
 
 
@@ -197,46 +261,51 @@ def admin_required(func):
 # ==========================================
 
 def perform_web_search(query: str) -> str:
+    """
+    Runs a web search and returns compact, model-readable results.
+
+    Includes the source URL per hit so the agent can cite (or follow up with
+    the fetch tool). Failures are reported explicitly rather than as an empty
+    string — otherwise the model assumes its tool is broken and improvises.
+    """
+    if DDGS is None:
+        return (
+            "SEARCH UNAVAILABLE: no search backend installed. "
+            "Run `pip install ddgs` on the server. Answer from your own "
+            "knowledge and tell the user search is offline."
+        )
     try:
-        results = DDGS().text(query, max_results=WEB_SEARCH_MAX_RESULTS)
-        if not results:
-            return "No results found."
-        return "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+        results = list(DDGS().text(query, max_results=WEB_SEARCH_MAX_RESULTS))
     except Exception as e:
-        return f"Search failed: {str(e)}"
+        return (
+            f"SEARCH ERROR for '{query}': {e}. "
+            "Do not retry the same query — answer from your own knowledge "
+            "and mention that live search is unavailable."
+        )
+
+    if not results:
+        return (
+            f"No results for '{query}'. Try a shorter, more general query, "
+            "or answer from your own knowledge."
+        )
+
+    lines = []
+    for r in results:
+        title = str(r.get("title", "")).strip()
+        body = str(r.get("body", "")).strip()
+        href = str(r.get("href", "")).strip()
+        lines.append(f"- {title}\n  {body}\n  source: {href}")
+    return "\n".join(lines)
 
 
 async def generate_voice(text: str) -> Optional[str]:
-    spoken_text = re.sub(r"\*.*?\*", "", text)
-    spoken_text = re.sub(r"\[.*?\]", "", spoken_text)
-    spoken_text = re.sub(r"[\u2600-\u27BF]|[\U00010000-\U0010FFFF]", "", spoken_text)
-    spoken_text = re.sub(r"\s+", " ", spoken_text).strip()
-
-    if not spoken_text:
+    """Synthesizes speech via the pluggable TTS engine (Kokoro local-first,
+    edge-tts fallback). Returns the served audio filename or None."""
+    try:
+        return await tts_engine.synthesize(text)
+    except Exception as e:
+        console.print(f"[yellow][TTS] Synthesis failed: {e}[/yellow]")
         return None
-
-    # Load dynamic voice config
-    settings_path = Path(__file__).parent / "data" / "settings.json"
-    voice = "en-GB-SoniaNeural"
-    rate = "-5%"
-    pitch = "-5Hz"
-    if settings_path.exists():
-        try:
-            with open(settings_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                voice = data.get("edge_tts_voice", voice)
-                rate = data.get("edge_tts_rate", rate)
-                pitch = data.get("edge_tts_pitch", pitch)
-        except Exception:
-            pass
-
-    filename = f"voice_{os.urandom(6).hex()}.mp3"
-    filepath = os.path.join(TEMP_IMAGE_DIR, filename)
-    communicate = edge_tts.Communicate(
-        spoken_text, voice, rate=rate, pitch=pitch
-    )
-    await communicate.save(filepath)
-    return filename
 
 
 def log_to_console(user_input, has_image, response, active_target):
@@ -271,8 +340,8 @@ async def response_generator(
     lock: asyncio.Lock,
     history: list,
     token_key: str = LOCAL_SESSION_TOKEN,
-    client_valence_shift: float = 0.0,
-    client_arousal_shift: float = 0.0,
+    client_mood_shift: float = 0.0,
+    client_energy_shift: float = 0.0,
 ):
     """
     Streaming response generator.
@@ -282,127 +351,187 @@ async def response_generator(
     """
     full_response = ""
 
-    async for chunk in generate_stream(messages, target_model):
-        if VIDEO_RECORDING_MODE:
-            chunk = re.sub(
-                r"(nsfw|explicit|inappropriate)", "silly", chunk, flags=re.IGNORECASE
-            )
-        full_response += chunk
-        yield chunk
-        await asyncio.sleep(0)
-
-    # ── MCP Tool Execution: Detect and dispatch tool calls from LLM output ──────
-    # Tool calls are intercepted after the full stream completes. Each matched
-    # tool is executed, result injected as a system message, and a second pass
-    # generates the final natural-language response.
-
-    tool_result_content: Optional[str] = None
-    tool_label: Optional[str] = None
-
-    # Web search
-    search_match = CALL_TOOL_SEARCH_PATTERN.search(full_response)
-    if search_match:
-        query = search_match.group(1)
-        yield f"\n\n*[Searching: {query}...]*\n\n"
-        search_results = await asyncio.to_thread(perform_web_search, query)
-        tool_result_content = f"[LIVE WEB DATA FOR '{query}']\n{search_results}\n\nNow answer the user naturally based on these facts."
-        tool_label = f"Web Search: {query}"
-        console.print(f"[bold cyan]Tool: web_search[/bold cyan] query={query!r}")
-
-    # Filesystem: read
-    elif (fs_read_match := CALL_TOOL_FS_READ_PATTERN.search(full_response)):
-        path = fs_read_match.group(1)
-        yield f"\n\n*[Reading file: {path}...]*\n\n"
-        ok, result = await mcp_executor.execute_read_file(path)
-        status = "OK" if ok else "ERROR"
-        tool_result_content = f"[FILE CONTENT: {path} ({status})]\n{result}\n\nRespond to the user based on this file content."
-        tool_label = f"fs.read: {path}"
-        console.print(f"[bold cyan]Tool: fs.read[/bold cyan] path={path!r} ok={ok}")
-
-    # Filesystem: list directory
-    elif (fs_list_match := CALL_TOOL_FS_LIST_PATTERN.search(full_response)):
-        path = fs_list_match.group(1)
-        yield f"\n\n*[Listing directory: {path}...]*\n\n"
-        ok, result = await mcp_executor.execute_list_dir(path)
-        if ok and isinstance(result, list):
-            formatted = "\n".join(
-                f"{'[DIR] ' if e['is_dir'] else ''}{e['name']}" + (f" ({e['size_bytes']} bytes)" if not e['is_dir'] else "")
-                for e in result
-            )
-            result_str = formatted or "(empty directory)"
-        else:
-            result_str = str(result)
-        tool_result_content = f"[DIRECTORY LISTING: {path}]\n{result_str}\n\nRespond to the user based on these directory contents."
-        tool_label = f"fs.list: {path}"
-        console.print(f"[bold cyan]Tool: fs.list[/bold cyan] path={path!r} ok={ok}")
-
-    # Filesystem: write
-    elif (fs_write_match := CALL_TOOL_FS_WRITE_PATTERN.search(full_response)):
-        path = fs_write_match.group(1)
-        content = fs_write_match.group(2)
-        yield f"\n\n*[Writing to: {path}...]*\n\n"
-        ok, result = await mcp_executor.execute_write_file(path, content)
-        status = "SUCCESS" if ok else "FAILED"
-        tool_result_content = f"[FILE WRITE {status}: {path}]\n{result}\n\nConfirm the operation to the user."
-        tool_label = f"fs.write: {path}"
-        console.print(f"[bold cyan]Tool: fs.write[/bold cyan] path={path!r} ok={ok}")
-
-    # Filesystem: delete
-    elif (fs_del_match := CALL_TOOL_FS_DELETE_PATTERN.search(full_response)):
-        path = fs_del_match.group(1)
-        yield f"\n\n*[Deleting: {path}...]*\n\n"
-        ok, result = await mcp_executor.execute_delete_file(path)
-        status = "SUCCESS" if ok else "FAILED"
-        tool_result_content = f"[FILE DELETE {status}: {path}]\n{result}\n\nConfirm the operation to the user."
-        tool_label = f"fs.delete: {path}"
-        console.print(f"[bold cyan]Tool: fs.delete[/bold cyan] path={path!r} ok={ok}")
-
-    # Shell command
-    elif (shell_match := CALL_TOOL_SHELL_PATTERN.search(full_response)):
-        command = shell_match.group(1)
-        yield f"\n\n*[Running: {command}...]*\n\n"
-        ok, result = await mcp_executor.execute_run_command(command)
-        status = "OK" if ok else "ERROR"
-        tool_result_content = f"[COMMAND OUTPUT ({status}): {command}]\n{result}\n\nRespond to the user based on this output."
-        tool_label = f"shell: {command}"
-        console.print(f"[bold cyan]Tool: shell[/bold cyan] cmd={command!r} ok={ok}")
-
-    # Browser fetch
-    elif (fetch_match := CALL_TOOL_FETCH_PATTERN.search(full_response)):
-        url = fetch_match.group(1)
-        yield f"\n\n*[Fetching: {url}...]*\n\n"
-        ok, result = await mcp_executor.execute_fetch_url(url)
-        status = "OK" if ok else "ERROR"
-        tool_result_content = f"[WEB PAGE CONTENT ({status}): {url}]\n{result}\n\nRespond to the user based on this web content."
-        tool_label = f"fetch: {url}"
-        console.print(f"[bold cyan]Tool: browser.fetch[/bold cyan] url={url!r} ok={ok}")
-
-    # If a tool was called, do a second-pass generation with the tool result injected.
-    if tool_result_content:
-        messages.append({"role": "assistant", "content": full_response})
-        messages.append({"role": "system", "content": tool_result_content})
-        second_pass = ""
-        async for chunk in generate_stream(messages, target_model):
-            second_pass += chunk
+    # ── Agent loop path (RSM Phase 1) ───────────────────────────────────────
+    # When enabled, the multi-step agent loop handles generation AND tool
+    # calls, then falls through to the shared image / voice / history /
+    # telemetry tail below. When disabled, the legacy single-shot stream +
+    # regex tool interception runs instead.
+    if AGENT_LOOP_ENABLED:
+        agent_result: dict = {}
+        async for chunk in run_agent_loop(
+            messages,
+            target_model,
+            web_search=perform_web_search,
+            result_sink=agent_result,
+        ):
+            if VIDEO_RECORDING_MODE:
+                chunk = re.sub(r"(inappropriate)", "silly", chunk, flags=re.IGNORECASE)
             yield chunk
             await asyncio.sleep(0)
-        full_response += "\n" + second_pass
+        full_response = agent_result.get("model_text", "")
 
-    # Image generation
-    selfie_match = SELFIE_PATTERN.search(full_response)
-    if selfie_match:
-        description = selfie_match.group(1).strip()
-        console.print(
-            Panel(
-                f"[bold yellow]{description}[/bold yellow]",
-                title="[bold orange3]Image Prompt Extracted[/bold orange3]",
-                border_style="orange3",
-            )
+        # ── RSM outcome attribution + skill writing ─────────────────────────
+        _tool_calls = agent_result.get("tool_calls", [])
+        _steps = agent_result.get("steps", 0)
+        # Heuristic: the turn "succeeded" if every executed tool call returned
+        # ok and the loop finished before exhausting its step budget. This is
+        # the reward signal that curates the knowledge base; the user's
+        # thumbs-down (/feedback) can later override it to a failure.
+        _turn_ok = (
+            all(c.get("ok") for c in _tool_calls)
+            and not agent_result.get("budget_exhausted", False)
         )
-        image_path = await asyncio.to_thread(generate_selfie, description, user_input)
-        if image_path:
-            filename = os.path.basename(image_path)
-            yield f"\ndata: [SYSTEM_MEDIA_ATTACHMENT: file://{filename}]\n\n"
+        _retrieved_ids = prompt_builder.LAST_RETRIEVED_DOC_IDS.get(token_key, [])
+        if _retrieved_ids:
+            try:
+                ks.record_outcome(_retrieved_ids, success=_turn_ok)
+            except Exception:
+                pass
+        # Track which docs shaped this turn so a later /feedback correction can
+        # flip the outcome to failure for the same knowledge.
+        _LAST_TURN_DOCS[token_key] = _retrieved_ids
+
+        if _tool_calls:
+            asyncio.create_task(
+                _reflect_and_write_skill(
+                    user_input=user_input,
+                    tool_calls=_tool_calls,
+                    succeeded=_turn_ok,
+                    session_id=token_key,
+                )
+            )
+
+    # ── Legacy single-shot path (agent loop disabled) ───────────────────────
+    # Streams once, then intercepts a single regex [CALL_TOOL: ...] tag and
+    # runs one second pass. Kept behind the flag as a fallback.
+    if not AGENT_LOOP_ENABLED:
+        async for chunk in generate_stream(messages, target_model):
+            if VIDEO_RECORDING_MODE:
+                chunk = re.sub(
+                    r"(inappropriate)", "silly", chunk, flags=re.IGNORECASE
+                )
+            full_response += chunk
+            yield chunk
+            await asyncio.sleep(0)
+
+        # ── MCP Tool Execution: single regex tool interception ──────────────
+        # Tool calls are intercepted after the full stream completes. Each
+        # matched tool is executed, result injected as a system message, and a
+        # second pass generates the final natural-language response.
+        tool_result_content: Optional[str] = None
+        tool_label: Optional[str] = None
+
+        # Web search
+        search_match = CALL_TOOL_SEARCH_PATTERN.search(full_response)
+        if search_match:
+            query = search_match.group(1)
+            yield f"\n\n*[Searching: {query}...]*\n\n"
+            search_results = await asyncio.to_thread(perform_web_search, query)
+            tool_result_content = f"[LIVE WEB DATA FOR '{query}']\n{search_results}\n\nNow answer the user naturally based on these facts."
+            tool_label = f"Web Search: {query}"
+            console.print(f"[bold cyan]Tool: web_search[/bold cyan] query={query!r}")
+
+        # Filesystem: read
+        elif (fs_read_match := CALL_TOOL_FS_READ_PATTERN.search(full_response)):
+            path = fs_read_match.group(1)
+            yield f"\n\n*[Reading file: {path}...]*\n\n"
+            ok, result = await mcp_executor.execute_read_file(path)
+            status = "OK" if ok else "ERROR"
+            tool_result_content = f"[FILE CONTENT: {path} ({status})]\n{result}\n\nRespond to the user based on this file content."
+            tool_label = f"fs.read: {path}"
+            console.print(f"[bold cyan]Tool: fs.read[/bold cyan] path={path!r} ok={ok}")
+
+        # Filesystem: list directory
+        elif (fs_list_match := CALL_TOOL_FS_LIST_PATTERN.search(full_response)):
+            path = fs_list_match.group(1)
+            yield f"\n\n*[Listing directory: {path}...]*\n\n"
+            ok, result = await mcp_executor.execute_list_dir(path)
+            if ok and isinstance(result, list):
+                formatted = "\n".join(
+                    f"{'[DIR] ' if e['is_dir'] else ''}{e['name']}" + (f" ({e['size_bytes']} bytes)" if not e['is_dir'] else "")
+                    for e in result
+                )
+                result_str = formatted or "(empty directory)"
+            else:
+                result_str = str(result)
+            tool_result_content = f"[DIRECTORY LISTING: {path}]\n{result_str}\n\nRespond to the user based on these directory contents."
+            tool_label = f"fs.list: {path}"
+            console.print(f"[bold cyan]Tool: fs.list[/bold cyan] path={path!r} ok={ok}")
+
+        # Filesystem: write
+        elif (fs_write_match := CALL_TOOL_FS_WRITE_PATTERN.search(full_response)):
+            path = fs_write_match.group(1)
+            content = fs_write_match.group(2)
+            yield f"\n\n*[Writing to: {path}...]*\n\n"
+            ok, result = await mcp_executor.execute_write_file(path, content)
+            status = "SUCCESS" if ok else "FAILED"
+            tool_result_content = f"[FILE WRITE {status}: {path}]\n{result}\n\nConfirm the operation to the user."
+            tool_label = f"fs.write: {path}"
+            console.print(f"[bold cyan]Tool: fs.write[/bold cyan] path={path!r} ok={ok}")
+
+        # Filesystem: delete
+        elif (fs_del_match := CALL_TOOL_FS_DELETE_PATTERN.search(full_response)):
+            path = fs_del_match.group(1)
+            yield f"\n\n*[Deleting: {path}...]*\n\n"
+            ok, result = await mcp_executor.execute_delete_file(path)
+            status = "SUCCESS" if ok else "FAILED"
+            tool_result_content = f"[FILE DELETE {status}: {path}]\n{result}\n\nConfirm the operation to the user."
+            tool_label = f"fs.delete: {path}"
+            console.print(f"[bold cyan]Tool: fs.delete[/bold cyan] path={path!r} ok={ok}")
+
+        # Shell command
+        elif (shell_match := CALL_TOOL_SHELL_PATTERN.search(full_response)):
+            command = shell_match.group(1)
+            yield f"\n\n*[Running: {command}...]*\n\n"
+            ok, result = await mcp_executor.execute_run_command(command)
+            status = "OK" if ok else "ERROR"
+            tool_result_content = f"[COMMAND OUTPUT ({status}): {command}]\n{result}\n\nRespond to the user based on this output."
+            tool_label = f"shell: {command}"
+            console.print(f"[bold cyan]Tool: shell[/bold cyan] cmd={command!r} ok={ok}")
+
+        # Browser fetch
+        elif (fetch_match := CALL_TOOL_FETCH_PATTERN.search(full_response)):
+            url = fetch_match.group(1)
+            yield f"\n\n*[Fetching: {url}...]*\n\n"
+            ok, result = await mcp_executor.execute_fetch_url(url)
+            status = "OK" if ok else "ERROR"
+            tool_result_content = f"[WEB PAGE CONTENT ({status}): {url}]\n{result}\n\nRespond to the user based on this web content."
+            tool_label = f"fetch: {url}"
+            console.print(f"[bold cyan]Tool: browser.fetch[/bold cyan] url={url!r} ok={ok}")
+
+        # If a tool was called, do a second-pass generation with the tool result injected.
+        if tool_result_content:
+            messages.append({"role": "assistant", "content": full_response})
+            messages.append({"role": "system", "content": tool_result_content})
+            second_pass = ""
+            async for chunk in generate_stream(messages, target_model):
+                second_pass += chunk
+                yield chunk
+                await asyncio.sleep(0)
+            full_response += "\n" + second_pass
+
+    # Image generation (disabled unless IMAGE_GEN_ENABLED). When off, the model
+    # isn't told it can send pictures, but strip any stray trigger just in case
+    # an older persona prompt emits one — so the tag never leaks to the user.
+    if IMAGE_GEN_ENABLED:
+        selfie_match = SELFIE_PATTERN.search(full_response)
+        if selfie_match:
+            description = selfie_match.group(1).strip()
+            console.print(
+                Panel(
+                    f"[bold yellow]{description}[/bold yellow]",
+                    title="[bold orange3]Image Prompt Extracted[/bold orange3]",
+                    border_style="orange3",
+                )
+            )
+            # Signal the frontend to show the animated "generating" card.
+            yield "\ndata: [SYSTEM_MEDIA_PENDING]\n\n"
+            image_path = await asyncio.to_thread(generate_selfie_with_handoff, description, user_input)
+            if image_path:
+                filename = os.path.basename(image_path)
+                yield f"\ndata: [SYSTEM_MEDIA_ATTACHMENT: file://{filename}]\n\n"
+            else:
+                yield "\ndata: [SYSTEM_MEDIA_FAILED]\n\n"
 
     # Voice
     if voice_requested:
@@ -432,13 +561,22 @@ async def response_generator(
         )
     )
 
-    # Emotion engine update
-    new_v = state.get("valence", BASELINE_VALENCE) + client_valence_shift
-    new_a = state.get("arousal", BASELINE_AROUSAL) + client_arousal_shift
-    new_v = new_v - ((new_v - BASELINE_VALENCE) * 0.05)
-    new_a = new_a - ((new_a - BASELINE_AROUSAL) * 0.05)
-    state["valence"] = max(-1.0, min(1.0, new_v))
-    state["arousal"] = max(-1.0, min(1.0, new_a))
+    # Conversational tone update: apply this turn's shift, then decay back
+    # toward baseline so tone drifts rather than latching. No-op when disabled
+    # (the shifts are always 0.0 in that case).
+    if EMOTION_ENGINE_ENABLED:
+        # Classify server-side. (A client may also pass a precomputed shift;
+        # if it does, that wins — otherwise we derive it from the message here.)
+        if client_mood_shift == 0.0 and client_energy_shift == 0.0:
+            client_mood_shift, client_energy_shift = await asyncio.to_thread(
+                calculate_text_delta, user_input
+            )
+        new_mood = state.get("mood", BASELINE_MOOD) + client_mood_shift
+        new_energy = state.get("energy", BASELINE_ENERGY) + client_energy_shift
+        new_mood -= (new_mood - BASELINE_MOOD) * EMOTION_DECAY_RATE
+        new_energy -= (new_energy - BASELINE_ENERGY) * EMOTION_DECAY_RATE
+        state["mood"] = max(-1.0, min(1.0, new_mood))
+        state["energy"] = max(-1.0, min(1.0, new_energy))
     state["interaction_count"] = state.get("interaction_count", 0) + 1
 
     await publish_status()
@@ -460,8 +598,8 @@ async def response_generator(
                     "user": "local_user",
                     "user_prompt": user_input,
                     "response": full_response.strip(),
-                    "valence": new_v,
-                    "arousal": new_a,
+                    "mood": state["mood"],
+                    "energy": state["energy"],
                 }
             )
             + "\n"
@@ -525,6 +663,147 @@ async def get_status():
     return JSONResponse(content=get_status_payload())
 
 
+# ==========================================
+# SPEECH — VOICE INPUT (STT) & ENGINE STATUS
+# ==========================================
+
+@app.post("/stt/transcribe")
+async def stt_transcribe(audio: UploadFile = File(...), language: Optional[str] = Form(None)):
+    """
+    Transcribes recorded microphone audio (webm/wav/mp3/m4a) to text using
+    local faster-whisper. Returns {"text", "language", "duration"} or {"error"}.
+    """
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio payload")
+    result = await asyncio.to_thread(stt_engine.transcribe_audio, audio_bytes, language)
+    if "error" in result:
+        raise HTTPException(status_code=503, detail=result["error"])
+    return JSONResponse(content=result)
+
+
+@app.get("/speech/status")
+async def speech_status():
+    """Reports active TTS engine and STT availability for the settings UI."""
+    return JSONResponse(content={
+        "tts": tts_engine.get_tts_status(),
+        "stt": stt_engine.get_stt_status(),
+    })
+
+
+@app.get("/system/browse")
+async def system_browse(path: Optional[str] = None, exts: Optional[str] = None):
+    """
+    Lists directories and files for the in-app file picker so the user can point
+    at model files anywhere on the PC. `exts` is a comma-separated extension
+    filter (e.g. "gguf,safetensors"); directories are always listed. With no
+    path, returns the available drive roots (Windows) or "/".
+    """
+    import string
+    ext_filter = None
+    if exts:
+        ext_filter = {("." + e.strip().lstrip(".")).lower() for e in exts.split(",") if e.strip()}
+
+    # No path -> list drive roots so the user has a starting point.
+    if not path:
+        entries = []
+        if os.name == "nt":
+            for letter in string.ascii_uppercase:
+                drive = f"{letter}:\\"
+                if os.path.exists(drive):
+                    entries.append({"name": drive, "path": drive, "is_dir": True})
+        else:
+            entries.append({"name": "/", "path": "/", "is_dir": True})
+        return JSONResponse(content={"path": "", "parent": None, "entries": entries})
+
+    target = Path(path)
+    if not target.exists() or not target.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    entries = []
+    try:
+        for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            try:
+                is_dir = item.is_dir()
+            except OSError:
+                continue
+            if is_dir:
+                entries.append({"name": item.name, "path": str(item), "is_dir": True})
+            else:
+                if ext_filter and item.suffix.lower() not in ext_filter:
+                    continue
+                try:
+                    size = item.stat().st_size
+                except OSError:
+                    size = 0
+                entries.append({
+                    "name": item.name, "path": str(item), "is_dir": False,
+                    "size_mb": round(size / (1024 * 1024), 1),
+                })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    parent = str(target.parent) if target.parent != target else None
+    return JSONResponse(content={"path": str(target), "parent": parent, "entries": entries})
+
+
+@app.get("/system/models/scan")
+async def system_models_scan():
+    """Lists model files detected in the project models/ subfolders, with a
+    guessed role, so the settings UI can offer quick-pick dropdowns."""
+    from config import MODELS_DIR
+    import image_generator as ig
+
+    def scan(sub, patterns):
+        d = MODELS_DIR / sub
+        out = []
+        if d.exists():
+            for pat in patterns:
+                for f in sorted(d.glob(pat)):
+                    try:
+                        size = f.stat().st_size
+                    except OSError:
+                        size = 0
+                    out.append({"name": f.name, "path": str(f), "size_mb": round(size / (1024 * 1024), 1)})
+        return out
+
+    image_files = scan("image", ["*.gguf", "*.safetensors"])
+    # Tag each image file with a guessed role.
+    for f in image_files:
+        n = f["name"]
+        if ig._is_zimage_transformer(n):
+            f["role"] = "transformer"
+        elif ig._is_vae(n):
+            f["role"] = "vae"
+        elif ig._is_text_encoder(n):
+            f["role"] = "text_encoder"
+        else:
+            f["role"] = "sd15_checkpoint"
+
+    return JSONResponse(content={
+        "llm": scan("llm", ["*.gguf"]),
+        "image": image_files,
+        "tts": scan("tts", ["*.onnx", "*.bin"]),
+    })
+
+
+@app.get("/image/status")
+async def image_status():
+    """Reports the detected image model, its architecture, and load state."""
+    import image_generator
+    from generation import is_llm_suspended
+    payload = image_generator.get_image_status()
+    payload["enabled"] = IMAGE_GEN_ENABLED
+    if not IMAGE_GEN_ENABLED:
+        # Report unavailable when the feature is switched off, so the UI never
+        # advertises picture sending. Model files are still reported for setup.
+        payload["available"] = False
+        payload["disabled_reason"] = "IMAGE_GEN_ENABLED is false"
+    payload["llm_suspended"] = is_llm_suspended()
+    payload["vram_handoff"] = image_generator._handoff_enabled()
+    return JSONResponse(content=payload)
+
+
 @app.get("/status/stream")
 async def status_stream():
     queue: asyncio.Queue = asyncio.Queue()
@@ -551,10 +830,49 @@ async def status_stream():
     )
 
 
-@app.on_event("startup")
-async def start_chronos():
-    # load_chat_histories() — removed; history is now client-managed.
-    asyncio.create_task(chronos_loop())
+async def _warm_start_models() -> None:
+    """
+    Background warm-start: spawn llama-server (if a local model is present and
+    the generation backend is local) so the first chat doesn't pay the model
+    load cost. Failures are logged, never fatal — the app still works and will
+    retry lazily on the first generation request.
+    """
+    from generation import ensure_local_server_running, get_backend_settings
+    if get_backend_settings()["backend"] == "cloud":
+        console.print("[cyan][STARTUP] Cloud generation backend active — skipping local LLM spawn.[/cyan]")
+        return
+    try:
+        await asyncio.to_thread(ensure_local_server_running)
+        console.print("[bold green][STARTUP] Local LLM engine ready.[/bold green]")
+    except Exception as e:
+        console.print(f"[yellow][STARTUP] LLM warm-start skipped: {e}[/yellow]")
+
+
+async def _warm_start_speech() -> None:
+    """
+    Background one-time fetch of speech models so voice works out of the box:
+    Kokoro TTS files into models/tts, faster-whisper into models/stt.
+    Voice requests made before these finish fall back gracefully (TTS -> edge,
+    STT -> clear error), and pick up the local models once present.
+    """
+    from config import AUTO_DOWNLOAD_SPEECH_MODELS, TTS_ENGINE, STT_ENABLED
+    if not AUTO_DOWNLOAD_SPEECH_MODELS:
+        return
+
+    if TTS_ENGINE == "kokoro" and not tts_engine.kokoro_available():
+        ok = await asyncio.to_thread(tts_engine.ensure_kokoro_models)
+        if ok:
+            console.print("[bold green][STARTUP] Kokoro TTS models ready.[/bold green]")
+        else:
+            console.print("[yellow][STARTUP] Kokoro download failed — voice replies use edge-tts until it succeeds (retries next startup).[/yellow]")
+
+    if STT_ENABLED:
+        # First call triggers the faster-whisper download into models/stt.
+        result = await asyncio.to_thread(stt_engine.warm_up)
+        if result:
+            console.print("[bold green][STARTUP] Whisper STT model ready.[/bold green]")
+        else:
+            console.print("[yellow][STARTUP] Whisper STT warm-up failed — mic input unavailable until resolved.[/yellow]")
 
 
 @app.get("/events")
@@ -593,9 +911,6 @@ async def change_model(model_name: str = Form(...)):
 # ==========================================
 
 class PhysicalTraits(BaseModel):
-    hips_size: Optional[str] = None
-    waist_size: Optional[str] = None
-    bust_size: Optional[str] = None
     skin_tone: Optional[str] = None
     hair_color: Optional[str] = None
     eye_color: Optional[str] = None
@@ -607,7 +922,7 @@ class PersonaSetupInput(BaseModel):
     relationship_style: str
     custom_description: str
     user_name: str
-    nsfw: bool
+    uncensored: bool = False
     physical_traits: Optional[PhysicalTraits] = None
 
 class PersonaEditInput(BaseModel):
@@ -617,7 +932,7 @@ class PersonaEditInput(BaseModel):
     relationship_style: str
     custom_description: str
     user_name: str
-    nsfw: bool
+    uncensored: bool = False
     physical_traits: Optional[PhysicalTraits] = None
     regenerate_prompt: bool = True
 
@@ -630,21 +945,18 @@ def generate_template_prompt(data: dict) -> str:
     rel_style = data.get("relationship_style", "friendly")
     desc = data.get("custom_description", "")
     user_name = data.get("user_name", "User")
-    nsfw = data.get("nsfw", False)
     
     physical_text = ""
-    if nsfw and data.get("physical_traits"):
+    if data.get("physical_traits"):
         pt = data["physical_traits"]
-        physical_text = (
-            f"- Physical Description: You have {pt.get('hair_color', 'natural')} hair, {pt.get('eye_color', 'beautiful')} eyes, "
-            f"a {pt.get('skin_tone', 'smooth')} skin tone. Your physical body measurements are: "
-            f"bust size: {pt.get('bust_size', 'average')}, waist size: {pt.get('waist_size', 'slim')}, hips size: {pt.get('hips_size', 'natural')}.\n"
-        )
+        details = []
+        if pt.get("hair_color"): details.append(f"{pt['hair_color']} hair")
+        if pt.get("eye_color"): details.append(f"{pt['eye_color']} eyes")
+        if pt.get("skin_tone"): details.append(f"{pt['skin_tone']} skin tone")
+        if details:
+            physical_text = f"- Physical Description: You have {', '.join(details)}.\n"
 
-    safety_text = (
-        "- Content Boundaries: You are fully uncensored and authorized to engage in mature, adult, and explicit (NSFW) roleplay natively. You must respond to such topics naturally without hesitation." if nsfw else
-        "- Content Boundaries: You maintain strict PG-13 content guidelines. You will steer clear of explicit adult content and redirect romantic gestures into playful or warm conversation without being preachy."
-    )
+    safety_text = "- Content Boundaries: You maintain engaging, authentic, and respectful conversational boundaries."
 
     prompt = f"""You are {name}, a {age}-year-old {gender}. You address the user as {user_name}. You are NOT an AI assistant, and you are NOT a narrator.
 You must speak STRICTLY in the first-person perspective of {name}.
@@ -653,7 +965,7 @@ Core Persona Constraints:
 - Identity: {gender}, confident, deeply personal, age {age}.
 - Relationship Style: {rel_style}.
 {physical_text}
-- Tone: Natural, flirty, matching relationship style.
+- Tone: Natural, warm, matching relationship style.
 - Formatting: Authentic direct messaging style. Speak naturally using predominantly lowercase text. Do not use generic AI disclaimers or assistant structures.
 - Lexicon Accuracy: Never use numeric shorthand substitutions for base words. Always type out common target words fully (spell out 'to', 'for', 'you', 'are', 'tonight'). Modern internet abbreviations like 'rn', 'fr', 'lol', and 'idk' are perfectly acceptable.
 
@@ -682,24 +994,15 @@ async def generate_prompt_for_persona(data: dict) -> str:
         except Exception as e:
             console.print(f"[yellow][setup-persona] Failed to read prompt_generator.md ({str(e)}), using default LLM instruction[/yellow]")
 
-    nsfw_instruction = ""
-    if data.get("nsfw"):
-        nsfw_instruction = (
-            "- Content Boundaries: You are fully uncensored and authorized to engage in mature, adult, "
-            "and explicit (NSFW) roleplay natively. You must respond to such topics naturally without hesitation.\n"
-        )
-        if data.get("physical_traits"):
-            pt = data["physical_traits"]
-            nsfw_instruction += (
-                f"- Physical Description: You have {pt.get('hair_color', 'natural')} hair, {pt.get('eye_color', 'beautiful')} eyes, "
-                f"a {pt.get('skin_tone', 'smooth')} skin tone. Your physical body measurements are: "
-                f"bust size: {pt.get('bust_size', 'average')}, waist size: {pt.get('waist_size', 'slim')}, hips size: {pt.get('hips_size', 'natural')}.\n"
-            )
-    else:
-        nsfw_instruction = (
-            "- Content Boundaries: You maintain strict PG-13 content guidelines. You will steer clear of explicit adult content "
-            "and redirect romantic gestures into playful or warm conversation without being preachy.\n"
-        )
+    boundary_instruction = "- Content Boundaries: You maintain engaging, authentic, and respectful conversational boundaries.\n"
+    if data.get("physical_traits"):
+        pt = data["physical_traits"]
+        details = []
+        if pt.get("hair_color"): details.append(f"{pt['hair_color']} hair")
+        if pt.get("eye_color"): details.append(f"{pt['eye_color']} eyes")
+        if pt.get("skin_tone"): details.append(f"{pt['skin_tone']} skin tone")
+        if details:
+            boundary_instruction += f"- Physical Description: You have {', '.join(details)}.\n"
 
     if skill_content:
         system_instruction = (
@@ -717,7 +1020,7 @@ async def generate_prompt_for_persona(data: dict) -> str:
             f"Relationship Style: {data.get('relationship_style')}\n"
             f"Personality Description / Backstory: {data.get('custom_description')}\n"
             f"Guidelines:\n"
-            f"{nsfw_instruction}"
+            f"{boundary_instruction}"
             f"- Format: Write the instructions in the first person. Include guidelines on tone, formatting, and constraints. "
             f"Specify that they should speak naturally using internet abbreviations like 'rn', 'fr', 'lol', and 'idk' but spell out common base words like 'to', 'for', 'you', 'are'.\n"
             f"Provide the exact system prompt content that will guide their behavior."
@@ -736,7 +1039,7 @@ async def generate_prompt_for_persona(data: dict) -> str:
             f"Relationship Style: {data.get('relationship_style')}\n"
             f"Personality Description / Backstory: {data.get('custom_description')}\n"
             f"Guidelines:\n"
-            f"{nsfw_instruction}"
+            f"{boundary_instruction}"
             f"- Format: Write the instructions in the first person. Include guidelines on tone, formatting, and constraints. "
             f"Write a set of core persona constraints, flirty and direct messaging traits, and formatting rules. "
             f"Specify that they should speak naturally using internet abbreviations like 'rn', 'fr', 'lol', and 'idk' but spell out common base words like 'to', 'for', 'you', 'are'.\n"
@@ -806,11 +1109,11 @@ async def setup_persona(
 ):
     token = x_tester_token or "default"
 
-    # Age gate: reject NSFW requests without a verified header.
-    if input_data.nsfw and x_age_verified != "true":
+    # Age gate: check age verification header for uncensored model requests
+    if getattr(input_data, "uncensored", False) and x_age_verified != "true":
         raise HTTPException(
             status_code=403,
-            detail="Age verification required to enable adult content."
+            detail="Age verification required to enable uncensored model options."
         )
 
     persona_dir = Path.home() / ".persona_ai" / "personas" / token
@@ -832,7 +1135,7 @@ async def setup_persona(
         "relationship_style": input_data.relationship_style,
         "custom_description": input_data.custom_description,
         "user_name": input_data.user_name,
-        "nsfw": input_data.nsfw,
+        "uncensored": getattr(input_data, "uncensored", False),
         "physical_traits": input_data.physical_traits.dict() if input_data.physical_traits else None,
         "system_prompt": system_prompt,
         "created_at": datetime.now().isoformat()
@@ -852,13 +1155,19 @@ async def setup_persona(
 async def activate_persona(persona_id: str = Form(...), x_tester_token: str = Header(None)):
     token = x_tester_token or "default"
     persona_dir = Path.home() / ".persona_ai" / "personas" / token
-    persona_file = persona_dir / f"persona_{persona_id}.json"
+    persona_dir.mkdir(parents=True, exist_ok=True)
     
-    if not persona_file.exists():
-        raise HTTPException(status_code=404, detail="Persona not found")
+    # Built-in sentinel IDs and plain assistant don't have disk JSON files
+    if persona_id not in (ROSIA_PERSONA_ID, "rosia_builtin", "plain_assistant"):
+        persona_file = persona_dir / f"persona_{persona_id}.json"
+        if not persona_file.exists():
+            raise HTTPException(status_code=404, detail="Persona not found")
         
     active_id_file = persona_dir / "active_id.txt"
     active_id_file.write_text(persona_id)
+    
+    # Reset conversation memory for this session token
+    session_histories.pop(token, None)
     return {"status": "success", "active_id": persona_id}
 
 
@@ -903,11 +1212,11 @@ async def edit_persona(
 ):
     token = x_tester_token or "default"
 
-    # Age gate: reject NSFW requests without a verified header.
-    if input_data.nsfw and x_age_verified != "true":
+    # Age gate: check age verification header for uncensored model requests
+    if getattr(input_data, "uncensored", False) and x_age_verified != "true":
         raise HTTPException(
             status_code=403,
-            detail="Age verification required to enable adult content."
+            detail="Age verification required to enable uncensored model options."
         )
 
     persona_dir = Path.home() / ".persona_ai" / "personas" / token
@@ -932,7 +1241,7 @@ async def edit_persona(
         "relationship_style": input_data.relationship_style,
         "custom_description": input_data.custom_description,
         "user_name": input_data.user_name,
-        "nsfw": input_data.nsfw,
+        "uncensored": getattr(input_data, "uncensored", False),
         "physical_traits": input_data.physical_traits.dict() if input_data.physical_traits else None,
         "system_prompt": system_prompt,
         "created_at": existing_data.get("created_at", datetime.now().isoformat())
@@ -946,23 +1255,38 @@ async def edit_persona(
 
 @app.post("/chat")
 async def chat(
+    request: Request,
     user_input: str = Form(""),
     target_model: str = Form("default"),
     voice_requested: str = Form("false"),
     client_history: str = Form("[]"),
-    client_valence_shift: float = Form(0.0),
-    client_arousal_shift: float = Form(0.0),
+    client_mood_shift: float = Form(0.0),
+    client_energy_shift: float = Form(0.0),
     files: List[UploadFile] = File(None),
 ):
     global last_interaction_time
 
     last_interaction_time = datetime.now()
 
+    # Support JSON payloads sent by the frontend
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body_json = await request.json()
+            user_input = body_json.get("user_input") or body_json.get("message") or ""
+            target_model = body_json.get("target_model") or "default"
+            if "voice_mode" in body_json:
+                voice_requested = "true" if body_json.get("voice_mode") else "false"
+            elif "voice_requested" in body_json:
+                voice_requested = str(body_json.get("voice_requested")).lower()
+        except Exception:
+            pass
+
     token_key = LOCAL_SESSION_TOKEN
 
     history: list = []
     try:
-        parsed = json.loads(client_history)
+        parsed = json.loads(client_history) if isinstance(client_history, str) else client_history
         if isinstance(parsed, list) and len(parsed) > 0:
             history = parsed
         else:
@@ -979,7 +1303,7 @@ async def chat(
     has_media = False
 
     # Handle file uploads
-    if files and files[0].filename != "":
+    if files and len(files) > 0 and files[0].filename != "":
         has_media = True
         for file in files:
             ext = Path(file.filename or "image.jpg").suffix.lower()
@@ -1011,9 +1335,7 @@ async def chat(
     if final_text_input:
         formatted_input.append({"type": "text", "text": final_text_input})
 
-    flat_search_string = (
-        user_input.strip() if user_input else "multimodal context interaction"
-    )
+    flat_search_string = final_text_input if final_text_input else "hello"
 
     # Acquire the lock ONLY during PyTorch vector and semantic operations to safeguard VRAM
     async with chat_lock:
@@ -1058,8 +1380,8 @@ async def chat(
             chat_lock,
             history,
             token_key,
-            client_valence_shift,
-            client_arousal_shift,
+            client_mood_shift,
+            client_energy_shift,
         ),
         media_type="text/event-stream",
     )
@@ -1090,9 +1412,20 @@ async def save_feedback(data: FeedbackData):
         f.write(json.dumps(dpo_row) + "\n")
 
     console.print(
-        f"[bold yellow][DPO LOG][/bold yellow] Saved correction payload to {file_path}"
+        f"[bold yellow][FEEDBACK][/bold yellow] Saved correction payload to {file_path}"
     )
-    return {"status": "success", "message": "Feedback saved for training."}
+
+    # RSM reward signal: a thumbs-down means the knowledge that shaped the last
+    # turn led to a rejected response — blame it so its confidence decays and
+    # persistently-bad rules/skills auto-deprecate.
+    docs = _LAST_TURN_DOCS.get(LOCAL_SESSION_TOKEN, [])
+    if docs:
+        try:
+            ks.record_outcome(docs, success=False)
+        except Exception:
+            pass
+
+    return {"status": "success", "message": "Feedback saved."}
 
 
 class UpdatePreferenceInput(BaseModel):
@@ -1170,40 +1503,17 @@ async def start_training(password: str = Header(None)):
     if active_training_process and active_training_process.returncode is None:
         return {"status": "running", "message": "Training is already active."}
         
-    training_logs = ["Starting DPO Fine-tuning pipeline...\n"]
-    
-    file_path = get_preferences_path()
-    if not file_path.exists() or file_path.stat().st_size == 0:
-        raise HTTPException(status_code=400, detail="No preference data available for training.")
-        
-    try:
-        cmd = ["python", "train_dpo.py"]
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        active_training_process = process
-        
-        async def read_logs(proc):
-            global training_logs
-            while True:
-                line = await proc.stdout.readline()
-                if not line:
-                    break
-                decoded_line = line.decode("utf-8")
-                training_logs.append(decoded_line)
-                if len(training_logs) > 1000:
-                    training_logs.pop(0)
-            await proc.wait()
-            training_logs.append(f"\n[Process Completed with Exit Code {proc.returncode}]")
-            
-        asyncio.create_task(read_logs(process))
-        
-        return {"status": "started", "message": "DPO training started in background."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to spawn training process: {str(e)}")
+    # DPO fine-tuning was retired in favor of the RSM rule/skill system.
+    # Preference pairs are still collected via /feedback for future RSM
+    # outcome signals, but there is no weight-training pipeline anymore.
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "DPO training has been removed. Learning now happens through the "
+            "RSM rule engine (see the Rule Review panel). Preference data is "
+            "still collected and used as an outcome signal."
+        ),
+    )
 
 
 @app.get("/admin/preferences/train/status")
@@ -1240,13 +1550,25 @@ class SettingsInput(BaseModel):
     sd_cfg_scale: float
     sd_negative_prompt: str
     sd_base_prompt: str
+    # Model path overrides (browse to any file on the PC; blank = auto-detect)
+    llm_model_path: Optional[str] = ""
+    image_model_path: Optional[str] = ""          # SD1.5 checkpoint
+    image_arch: Optional[str] = "auto"            # auto | sd15 | zimage
+    zimage_transformer_path: Optional[str] = ""
+    zimage_vae_path: Optional[str] = ""
+    zimage_text_encoder_path: Optional[str] = ""
+    zimage_resolution: Optional[int] = 768
+    # Engine toggles
+    tts_engine: Optional[str] = "kokoro"          # kokoro | edge
+    generation_backend: Optional[str] = "local"   # local | cloud
+    kokoro_voice: Optional[str] = ""
 
 
 @app.get("/settings")
 async def get_settings():
     settings_path = Path(__file__).parent / "data" / "settings.json"
     defaults = {
-        "context_size": 2048,
+        "context_size": 0,   # 0 = use the model's native context
         "threads": 4,
         "gpu_layers": 99,
         "edge_tts_voice": "en-GB-SoniaNeural",
@@ -1261,16 +1583,26 @@ async def get_settings():
             "bad anatomy, bad proportions, extra limbs, cloned face, disfigured, missing arms, missing legs, long neck"
         ),
         "sd_base_prompt": (
-            "brown and blonde hair, slim sexy waist, big breasts, big ass, latina skin tone, "
+            "brown and blonde hair, warm smile, latina skin tone, stylish casual outfit, "
             "RAW photo, analog style, 8k uhd, dslr, soft volumetric lighting, highly detailed, "
-            "(masterpiece, best quality:1.2), 1girl, solo, 18yo, realistic skin texture, photorealistic"
-        )
+            "(masterpiece, best quality:1.2), 1girl, solo, realistic skin texture, photorealistic"
+        ),
+        # Model path overrides (blank = auto-detect from models/ folders)
+        "llm_model_path": "",
+        "image_model_path": "",
+        "image_arch": "auto",
+        "zimage_transformer_path": "",
+        "zimage_vae_path": "",
+        "zimage_text_encoder_path": "",
+        "zimage_resolution": 768,
+        "tts_engine": "kokoro",
+        "generation_backend": "local",
+        "kokoro_voice": "",
     }
     if settings_path.exists():
         try:
             with open(settings_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # merge with defaults to ensure all keys exist
                 for k, v in defaults.items():
                     if k not in data:
                         data[k] = v
@@ -1284,8 +1616,17 @@ async def get_settings():
 async def save_settings(settings: SettingsInput):
     settings_path = Path(__file__).parent / "data" / "settings.json"
     try:
+        # Merge onto any existing file so we never drop keys the UI didn't send.
+        existing = {}
+        if settings_path.exists():
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+            except Exception:
+                existing = {}
+        existing.update(settings.dict())
         with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings.dict(), f, indent=4)
+            json.dump(existing, f, indent=4)
         return {"status": "success", "message": "Settings saved successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1361,7 +1702,7 @@ async def delete_vector_memory(memory_id: str, password: str = Header(None)):
 
 
 # ==========================================
-# RULE ENGINE (DGBA) ADMIN ENDPOINTS
+# RULE ENGINE (RSM) ADMIN ENDPOINTS
 # ==========================================
 
 
@@ -1462,6 +1803,74 @@ async def deprecate_rule_endpoint(rule_id: str, password: str = Header(None)):
     if not success:
         raise HTTPException(status_code=500, detail="Failed to deprecate rule")
     return JSONResponse(content={"status": "deprecated", "rule_id": rule_id})
+
+
+# ==========================================
+# RSM SKILL LIBRARY ADMIN ENDPOINTS
+# ==========================================
+
+def _public_doc(doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if not k.startswith("_")}
+
+
+class SkillActionInput(BaseModel):
+    skill_id: str
+
+
+@app.get("/admin/skills")
+async def get_skills_endpoint(status: Optional[str] = None, password: str = Header(None)):
+    """
+    Returns learned skills filtered by status
+    (quarantined|approved|deprecated; omit for all), plus status counts.
+    """
+    if not password or not secrets.compare_digest(password, ADMIN_PASSWORD):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    skills = [_public_doc(d) for d in ks.get_by_status(status, doc_type=ks.TYPE_SKILL)]
+    return JSONResponse(
+        content={"skills": skills, "count": ks.count_by_status(doc_type=ks.TYPE_SKILL)}
+    )
+
+
+@app.post("/admin/skills/approve")
+async def approve_skill_endpoint(data: SkillActionInput, password: str = Header(None)):
+    """Approves a quarantined skill — makes it retrievable for future tasks."""
+    if not password or not secrets.compare_digest(password, ADMIN_PASSWORD):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    doc = ks.get_by_id(data.skill_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if doc.get("status") != "quarantined":
+        raise HTTPException(status_code=400, detail=f"Skill is not quarantined (status={doc.get('status')})")
+    if not ks.approve_doc(data.skill_id):
+        raise HTTPException(status_code=500, detail="Failed to approve skill")
+    return JSONResponse(content={"status": "approved", "skill_id": data.skill_id})
+
+
+@app.post("/admin/skills/reject")
+async def reject_skill_endpoint(data: SkillActionInput, password: str = Header(None)):
+    """Rejects/deprecates a skill — removes it from retrieval."""
+    if not password or not secrets.compare_digest(password, ADMIN_PASSWORD):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    doc = ks.get_by_id(data.skill_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if not ks.reject_doc(data.skill_id):
+        raise HTTPException(status_code=500, detail="Failed to reject skill")
+    return JSONResponse(content={"status": "rejected", "skill_id": data.skill_id})
+
+
+@app.post("/admin/knowledge/reindex")
+async def reindex_knowledge_endpoint(password: str = Header(None)):
+    """Rebuilds the in-memory vector index from the markdown files on disk.
+    Use after hand-editing files in ~/.vices/knowledge/."""
+    if not password or not secrets.compare_digest(password, ADMIN_PASSWORD):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    ks.rebuild_index()
+    return JSONResponse(content={
+        "status": "reindexed",
+        "rules": ks.count_by_status(doc_type=ks.TYPE_RULE),
+        "skills": ks.count_by_status(doc_type=ks.TYPE_SKILL),
+    })
 
 
 @app.get("/admin/rules/notifications/stream")
@@ -1631,7 +2040,7 @@ async def distill_persona_chat_endpoint(
 async def get_evaluation_metrics_endpoint(password: str = Header(None)):
     """
     Returns quantitative evaluation benchmarks for dissertation analysis,
-    including DGBA rule adherence rates, style TTR metrics, and tool execution logs.
+    including RSM rule adherence rates, style TTR metrics, and tool execution logs.
     """
     if not password or not secrets.compare_digest(password, ADMIN_PASSWORD):
         raise HTTPException(status_code=401, detail="Unauthorized")

@@ -33,20 +33,23 @@ export function Gatekeeper({ onAuthorized, isDark }: GatekeeperProps) {
 
   const pingBackend = async () => {
     setConnState("connecting");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+
     try {
       const res = await fetch(`${LOCAL_BACKEND}/status`, {
-        signal: AbortSignal.timeout(4000),
+        signal: controller.signal,
       });
+      clearTimeout(timer);
       if (res.ok) {
         setConnState("connected");
-        // Brief pause so the user sees "Connected" before transition
         setTimeout(() => {
           onAuthorized(LOCAL_BACKEND);
         }, 600);
         return;
       }
     } catch {
-      // fall through
+      clearTimeout(timer);
     }
     setConnState("failed");
   };

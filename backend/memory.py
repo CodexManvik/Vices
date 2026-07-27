@@ -1,22 +1,20 @@
 import os
 import json
 import re
+import threading
 import numpy as np
-import torch
-from sentence_transformers import SentenceTransformer
-from turbovec import IdMapIndex
-from reranker import rerank
+
 from config import (
-    TV_INDEX_PATH, METADATA_PATH, EMBEDDING_MODEL, RETRIEVAL_INITIAL_K,
-    RETRIEVAL_MAX_EXPLICIT_DOCS, RETRIEVAL_FINAL_RETURN_COUNT,
-    EXPLICIT_WORDS, ENABLE_CONTENT_GUARDRAILS, NORMALIZE_SLANG,
-    MAX_VRAM_ALLOCATION
+    TV_INDEX_PATH, METADATA_PATH, RETRIEVAL_INITIAL_K,
+    RETRIEVAL_MAX_DOCS, RETRIEVAL_FINAL_RETURN_COUNT,
+    ENABLE_CONTENT_GUARDRAILS, NORMALIZE_SLANG,
 )
+import embeddings
 
 # --- SYSTEM CONFIGURATION ---
-# Note: These are now loaded from config.py via environment variables
+# Heavy assets (embedding model, turbovec index, reranker) are loaded lazily on
+# the first retrieval so the API server boots instantly.
 
-# Move text normalization out into a maintainable data structure
 SLANG_MAP = {
     r'\b2\b': 'to',
     r'\b4\b': 'for',
@@ -28,27 +26,45 @@ SLANG_MAP = {
 
 RETRIEVAL_PARAMS = {
     "initial_k": RETRIEVAL_INITIAL_K,
-    "max_explicit_docs": RETRIEVAL_MAX_EXPLICIT_DOCS,
+    "max_docs": RETRIEVAL_MAX_DOCS,
     "final_return_count": RETRIEVAL_FINAL_RETURN_COUNT
 }
 
-# --- ENGINE INITIALIZATION ---
-# Safeguard: For 4GB VRAM budgets, execute secondary local pipelines on CPU.
-# This prevents CUDA dynamic allocations from OOM-crashing your primary LLM server (Gemma).
-device = "cuda" if (torch.cuda.is_available() and MAX_VRAM_ALLOCATION > 4) else "cpu"
-print(f"[RETRIEVAL ENGINE] Initializing embedding models on device: {device.upper()}...")
-model = SentenceTransformer(EMBEDDING_MODEL, device=device)
+# --- LAZY ENGINE STATE ---
+_lock = threading.Lock()
+_index = None
+_metadata_lookup: dict = {}
+_index_loaded = False
 
-if os.path.exists(TV_INDEX_PATH) and os.path.exists(METADATA_PATH):
-    index = IdMapIndex.load(TV_INDEX_PATH)
-    with open(METADATA_PATH, "r", encoding="utf-8") as f:
-        metadata_lookup = json.load(f)
-    print("[RETRIEVAL ENGINE] Loaded Turbovec Index and lookup maps.")
-else:
-    index = None
-    metadata_lookup = {}
-    print("[WARNING] Vector database matching keys not found! Run build_memory_db.py.")
 
+def _ensure_index():
+    """Loads the turbovec index + metadata once, on first use."""
+    global _index, _metadata_lookup, _index_loaded
+    if _index_loaded:
+        return
+    with _lock:
+        if _index_loaded:
+            return
+        if os.path.exists(TV_INDEX_PATH) and os.path.exists(METADATA_PATH):
+            try:
+                from turbovec import IdMapIndex
+                _index = IdMapIndex.load(TV_INDEX_PATH)
+                with open(METADATA_PATH, "r", encoding="utf-8") as f:
+                    _metadata_lookup = json.load(f)
+                print("[RETRIEVAL ENGINE] Loaded Turbovec index and lookup maps.")
+            except Exception as e:
+                # An incompatible/corrupt index must not take down chat — degrade
+                # to "no episodic memory" and tell the user how to fix it.
+                _index = None
+                _metadata_lookup = {}
+                print(
+                    f"[RETRIEVAL ENGINE] Could not load episodic memory index ({e}). "
+                    "Episodic recall is DISABLED. Rebuild it with:  "
+                    "py -3.11 backend/build_memory_db.py"
+                )
+        else:
+            print("[RETRIEVAL ENGINE] No episodic memory index found (run build_memory_db.py to create one).")
+        _index_loaded = True
 
 
 # --- CORE LOGIC ---
@@ -56,52 +72,41 @@ def clean_text_shorthand(text: str) -> str:
     """Standardizes chat slang using the dynamic lookup map configuration."""
     if not NORMALIZE_SLANG:
         return text
-    
+
     for pattern, replacement in SLANG_MAP.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
 
 def enforce_content_guardrails(docs: list) -> list:
-    """Clamps explicit examples based on configured volume limits."""
+    """Enforces document count limits based on configuration."""
     if not ENABLE_CONTENT_GUARDRAILS:
         return docs
-    
-    filtered = []
-    explicit_count = 0
-    
-    for doc in docs:
-        is_explicit = any(word in doc.lower() for word in EXPLICIT_WORDS)
-        
-        if is_explicit:
-            explicit_count += 1
-            if explicit_count > RETRIEVAL_PARAMS["max_explicit_docs"]:
-                continue
-                
-        filtered.append(doc)
-    return filtered
+    return docs[:RETRIEVAL_PARAMS["max_docs"]]
 
 
 def retrieve_memories(query: str):
-    if index is None or not metadata_lookup:
+    _ensure_index()
+    if _index is None or not _metadata_lookup:
         return []
 
-    # 1. Vector query structure generation
-    query_vector = model.encode(query).astype(np.float32).reshape(1, -1)
-    
+    # 1. Vector query structure generation (shared embedding model)
+    query_vector = embeddings.encode(query, normalize=False).reshape(1, -1)
+
     # 2. Hardware accelerated 4-bit retrieval pass
-    _, retrieved_ids = index.search(query_vector, k=RETRIEVAL_PARAMS["initial_k"])
-    
+    _, retrieved_ids = _index.search(query_vector, k=RETRIEVAL_PARAMS["initial_k"])
+
     docs = [
-        metadata_lookup[str(uid)]["raw_text"] 
-        for uid in retrieved_ids[0] 
-        if str(uid) in metadata_lookup
+        _metadata_lookup[str(uid)]["raw_text"]
+        for uid in retrieved_ids[0]
+        if str(uid) in _metadata_lookup
     ]
 
     if not docs:
         return []
 
     # 3. Execution of Rerank, Sanitization, and Guardrail pipelines
+    from reranker import rerank
     reranked_docs = rerank(query, docs)
     cleaned_docs = [clean_text_shorthand(doc) for doc in reranked_docs]
     safeguarded_docs = enforce_content_guardrails(cleaned_docs)

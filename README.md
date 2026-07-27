@@ -1,82 +1,121 @@
-# VICES AI Pipeline
+# VICES — Local-First AI Agent & Companion
 
-A high-performance desktop and server hybrid architecture running decentralized, retrieval-augmented companion intelligence.
+VICES is a desktop AI agent that runs **100% on your own machine**. It chats,
+speaks, listens, sees images, executes tasks on your PC under strict
+permissions — and it *learns*: every completed task can become a reviewable
+markdown skill it uses to do better next time (**RSM — Reflective Skill
+Memory**).
+
+## Highlights
+
+- **Local everything** — llama.cpp LLM, Kokoro TTS, Whisper STT, Stable
+  Diffusion image gen, turbovec + LanceDB memory. No cloud required
+  (optional OpenAI-compatible cloud backend if you want it).
+- **RSM learning without fine-tuning** — the agent reflects on conversations
+  and tasks, writes behavioral rules + procedural skills as plain markdown
+  files you can read, edit, or git-version. You approve or reject everything;
+  outcome tracking automatically promotes what works and retires what fails.
+- **Real agent loop** — multi-step tool use (files, shell, web) with a
+  permission manifest, full audit log, and one-click rollback of file changes.
+- **Personas** — built-in companion, custom personas, or a style distilled
+  privately from your own chat exports (WhatsApp/Telegram/Discord/CSV).
+- **Measurable** — a built-in A/B benchmark runs the agent with and without
+  RSM knowledge and reports success rates (see `backend/benchmark_agent.py`).
+
+## Install
+
+Prerequisites: [Python 3.10+](https://python.org), [Node.js 20+](https://nodejs.org), [Rust](https://rustup.rs) (for Tauri).
+
+```bash
+# Windows (PowerShell) — add -Cuda for NVIDIA builds of llama.cpp
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+```bash
+# Linux / macOS — add --cuda for NVIDIA builds of llama.cpp
+bash scripts/install.sh
+```
+
+The installer creates a Python venv, installs all dependencies, and downloads
+the llama.cpp server binary into `bin/llama/`.
+
+## Add models
+
+Drop model files into the `models/` folder — that's it. See
+[models/README.md](models/README.md) for download links.
+
+| Folder | What | Required? |
+|---|---|---|
+| `models/llm/` | Chat model (`.gguf`) | **Yes** — the only manual step |
+| `models/tts/` | Kokoro voice | Auto-downloads on first startup |
+| `models/stt/` | Whisper | Auto-downloads on first startup |
+| `models/image/` | SD checkpoint (`.safetensors`) | No — selfies disabled without it |
+
+## Run
+
+```bash
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1
+```
+
+```bash
+# Linux / macOS
+bash scripts/start.sh
+```
+
+This starts the backend (which auto-spawns the LLM engine — no manual
+llama.cpp wrangling) and opens the desktop app. First launch loads models,
+so give it a moment.
 
 ## Architecture
-The system utilizes a client-server hybrid microservices architecture:
-1. **Decentralized Frontend (Tauri v2 / React / Vite):** Executed locally in a secure client webview context. Performs hardware-aware capability detection (via WebGPU and WebGL), client-side text sanitization, parallel web scraping (bypassing CORS via tauri-plugin-http), client-side WASM emotion parsing using Xenova/distilroberta-base-emotion-6, and live speech visualizers.
-2. **Local Inference Engine (llama.cpp):** Runs quantised Gemma-4 4B models (censored or uncensored) locally on consumer discrete GPUs with VRAM >= 4GB.
-3. **Server Backend (FastAPI / Uvicorn):** Manages vector retrieval, entity extraction, relational memory graphs via LanceDB, speech synthesis via Edge-TTS, Stable Diffusion selfie generators, and background llama.cpp subprocess orchestrators.
 
-## Features
-- **Adaptive Setup & NSFW Downloader:** Automatically scans GPU memory and offers mature content downloading toggles, retrieving Gemma-4-E4B-Uncensored-HauhauCS or gemma-4-E4B-it from Hugging Face sequentially.
-- **Companion Persona Wizard:** Gathers parameters (Name, Pronouns, Dynamics, NSFW traits) and invokes the local LLM to dynamically synthesize custom personality prompts.
-- **Memory Diagnostic Console:** Secure password-authenticated dashboard for inspecting and pruning LanceDB vector spaces and networkx relationship graphs.
-- **Advanced Control Panels:** Sliders to tune context size (-c), CPU threads (-t), and GPU layers (-ngl) dynamically, along with edge-tts accents and Stable Diffusion base prompts.
-- **Real-Time Web Search & Scraper:** Detects URLs, fetches raw text in parallel, and extracts plain text up to 400 words bypassing browser CORS restrictions.
-- **Generative Audio & Visual Lip-Sync:** Edge-TTS audio streams synced to Web Audio API analyzer graphs for real-time visual companion mouth sync.
-- **Stable Diffusion Selfies:** Real-time generation of custom selfies based on conversation mood states and explicit trigger keywords.
-- **Chat Exporter & Code Highlighter:** Highlight code blocks and download conversation histories to JSON format.
-
-## Prerequisites
-- Python 3.10+
-- Node.js 20+ & pnpm
-- Rust toolchain (for Tauri compilation)
-
-## Environment Setup
-Create a `.env` file in the root directory:
-```bash
-LLAMA_BASE_URL=http://127.0.0.1:8080/v1
-LLAMA_TIMEOUT=120
-MODEL_PATH=C:\AI\models\realismByStableYogi_sd15V9.safetensors
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8000
-CORS_ALLOW_ORIGINS=*
-ADMIN_PASSWORD=your_secure_admin_password
-ADMIN_TOKEN_SECRET=your_auth_secret_key
-REQUEST_STORAGE_PATH=backend/data/access_requests.json
-APPROVED_TOKENS_PATH=backend/data/approved_tokens.json
+```
+frontend_app/   Tauri v2 + React desktop app
+backend/        FastAPI server
+  agent_loop.py         multi-step tool loop (JSON tool calls)
+  knowledge_store.py    RSM: rules + skills as markdown on disk
+  rule_engine.py        reflection pass -> behavioral rules
+  skill_engine.py       task reflection -> procedural skills
+  mcp_executor.py       fs/shell/web tools + permission manifest
+  transaction_log.py    audit log + rollback
+  memory.py             episodic memory (turbovec 4-bit)
+  tts_engine.py         Kokoro (local) / Edge (fallback)
+  stt_engine.py         faster-whisper voice input
+  image_generator.py    Stable Diffusion selfies
+  benchmark_agent.py    RSM on/off A/B evaluation
+models/         your model files (see models/README.md)
+bin/llama/      llama.cpp server binary (installed by script)
+scripts/        install + start scripts
 ```
 
-## Installation & Run
+Learned knowledge lives in `~/.vices/knowledge/` as markdown files;
+permissions in `~/.vices/permissions.yaml`; the transaction log in
+`~/.vices/transactions.json`.
 
-1. Install Python dependencies:
+## Configuration
+
+Copy `.env.example` to `.env` (the installer does this) and adjust as needed.
+Key settings:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AGENT_LOOP_ENABLED` | `true` | multi-step agent loop |
+| `AGENT_MAX_STEPS` | `8` | tool-step budget per turn |
+| `GENERATION_BACKEND` | `local` | `local` (llama.cpp) or `cloud` |
+| `TTS_ENGINE` | `kokoro` | `kokoro` (local) or `edge` (cloud) |
+| `STT_MODEL_SIZE` | `small` | whisper size: tiny/base/small/medium |
+| `MAX_VRAM_ALLOCATION` | `4` | GB budget; ≤4 keeps aux models on CPU |
+
+## Evaluation (dissertation)
+
 ```bash
-pip install fastapi uvicorn pydantic httpx requests duckduckgo-search pytz edge-tts rich lancedb networkx numpy pandas
+# A/B benchmark: agent with vs without RSM knowledge
+.venv/Scripts/python backend/benchmark_agent.py --seed --runs 3
 ```
 
-2. Start the Backend API Server:
-```bash
-# On Windows (PowerShell):
-$env:ADMIN_PASSWORD="your_secure_admin_password"
-python backend/server.py
+Metrics endpoint: `GET /admin/eval/metrics` — all values are measured from
+stored data; missing data reports as `null`, never a fabricated default.
 
-# On Linux/macOS:
-ADMIN_PASSWORD="your_secure_admin_password" python backend/server.py
-```
+## API
 
-3. Install Frontend node dependencies:
-```bash
-cd frontend_app
-pnpm install
-```
-
-4. Start the Tauri Desktop Client:
-```bash
-pnpm tauri dev
-```
-
-## API Documentation
-The FastAPI server exposes Swagger documentation on `/docs` and Redoc on `/redoc` when running.
-
-Primary Endpoints:
-- `POST /chat`: Stateless message completion endpoint, supporting history serialization, emotion deltas, and file attachments.
-- `GET /status`: Retrieves current valence, arousal, chemistry, and model status metrics.
-- `GET /status/stream`: SSE stream broadcasting real-time affective state shifts.
-- `GET /personas`: Retrieves companion profiles.
-- `POST /personas/setup`: Formulates custom companion system prompts via local LLM.
-- `POST /personas/activate`: Switches active companion profiles.
-- `GET /settings` / `POST /settings/save`: Fetches and saves advanced configuration presets.
-- `GET /admin/memories`: Fetches LanceDB vectors and graph entities.
-- `DELETE /admin/memories/vector/{memory_id}`: Deletes a vector record from memory.
-- `DELETE /admin/memories/graph/{node_name}`: Deletes a node link from the network graph.
+Swagger docs at `http://localhost:8000/docs` when the backend is running.

@@ -1,12 +1,28 @@
+/**
+ * Sidebar.tsx — app navigation rail.
+ * Styled entirely with the --v-* design tokens (see styles/theme.css), so it
+ * adapts to dark/light automatically. The old THREE.js face mesh is replaced
+ * by a lightweight CSS presence orb that breathes while the agent speaks.
+ */
+
 import { motion } from "motion/react";
-import { Sun, Moon, MessageSquare, Plus, Trash2, Settings, Database, Sliders } from "lucide-react";
-import { AIAvatar } from "./AIAvatar";
+import {
+  Sun,
+  Moon,
+  MessageSquare,
+  Plus,
+  Trash2,
+  Settings,
+  Database,
+  Sliders,
+  Sparkles,
+} from "lucide-react";
 import { Conversation } from "../App";
 
 interface SidebarProps {
   isDark: boolean;
   toggleTheme: () => void;
-  chemistry: number;
+  toneEnabled?: boolean;
   mood: string;
   conversations: Conversation[];
   activeConversationId: string | null;
@@ -14,17 +30,60 @@ interface SidebarProps {
   onNewConversation: () => void;
   onDeleteConversation: (id: string) => void;
   typing: boolean;
-  audioAnalyser?: AnalyserNode | null;
   activeCompanionName?: string;
   onConfigurePersona?: () => void;
   onShowSettings?: () => void;
   onShowMemory?: () => void;
 }
 
+// Conversation tone states produced by the backend tone engine
+// (mood × energy). Only shown when the tone engine is enabled.
+const MOOD_COLORS: Record<string, string> = {
+  neutral: "#7c5cff",
+  positive: "#fbbf24",
+  warm: "#f59e0b",
+  enthusiastic: "#ec4899",
+  calm: "#38bdf8",
+  relaxed: "#a78bfa",
+  guarded: "#94a3b8",
+  tense: "#f43f5e",
+  downcast: "#3b82f6",
+  flat: "#6b7280",
+};
+
+/**
+ * Compact status dot. Replaces the old animated orb — a quiet indicator
+ * reads better next to text than a decorative sphere, and the tone colour
+ * now lives around the prompt box where the user is actually looking.
+ */
+function StatusDot({ mood, typing }: { mood: string; typing: boolean }) {
+  const color = MOOD_COLORS[mood?.toLowerCase()] || "var(--v-accent)";
+  return (
+    <span className="relative flex w-2.5 h-2.5 shrink-0" aria-hidden="true">
+      {typing && (
+        <motion.span
+          className="absolute inline-flex w-full h-full rounded-full"
+          style={{ background: color }}
+          animate={{ scale: [1, 2.1], opacity: [0.5, 0] }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "easeOut" }}
+        />
+      )}
+      <span
+        className="relative inline-flex w-2.5 h-2.5 rounded-full"
+        style={{
+          background: color,
+          boxShadow: `0 0 8px ${typing ? color : "transparent"}`,
+          transition: "background var(--v-dur-slow) var(--v-ease), box-shadow var(--v-dur) var(--v-ease)",
+        }}
+      />
+    </span>
+  );
+}
+
 export function Sidebar({
   isDark,
   toggleTheme,
-  chemistry,
+  toneEnabled = false,
   mood,
   conversations,
   activeConversationId,
@@ -32,285 +91,168 @@ export function Sidebar({
   onNewConversation,
   onDeleteConversation,
   typing,
-  audioAnalyser = null,
   activeCompanionName = "Rosia",
   onConfigurePersona,
   onShowSettings,
   onShowMemory,
 }: SidebarProps) {
+  const moodColor = MOOD_COLORS[mood?.toLowerCase()] || "var(--v-accent)";
+
   return (
     <aside
-      className="w-[260px] shrink-0 flex flex-col"
+      className="w-[268px] shrink-0 flex flex-col h-full"
       style={{
-        background: isDark ? "#0A0A0A" : "#FAFAF9",
-        borderRight: isDark
-          ? "1px solid rgba(255,255,255,0.06)"
-          : "1px solid rgba(0,0,0,0.06)",
+        background: "var(--v-sidebar)",
+        borderRight: "1px solid var(--v-border)",
+        color: "var(--v-text)",
       }}
     >
-      {/* Header */}
-      <div className="px-6 pt-7 pb-3 flex items-center justify-between">
-        <h1
-          style={{
-            fontFamily: "'Cormorant Garamond', serif",
-            fontSize: "26px",
-            fontWeight: 500,
-            letterSpacing: "0.18em",
-            color: isDark ? "#E2E8F0" : "#1C1917",
-            lineHeight: 1,
-          }}
+      {/* Brand */}
+      <div className="px-5 pt-6 pb-4 flex items-center gap-2.5 select-none">
+        <div
+          className="w-8 h-8 rounded-[10px] flex items-center justify-center"
+          style={{ background: "var(--v-accent)", color: "var(--v-accent-contrast)" }}
         >
-          VICES
-        </h1>
-      </div>
-
-      {/* Dynamic 3D Face Wireframe Avatar */}
-      <div className="flex justify-center items-center py-2 mb-2">
-        <AIAvatar mood={mood} typing={typing} size={155} audioAnalyser={audioAnalyser} />
-      </div>
-
-      {/* Rosia Core status */}
-      <div
-        className="mx-3 mb-4 p-3 rounded-xl"
-        style={{
-          background: isDark ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.025)",
-          border: isDark
-            ? "1px solid rgba(255,255,255,0.05)"
-            : "1px solid rgba(0,0,0,0.05)",
-        }}
-      >
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <motion.span
-              animate={{ opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 2.6, repeat: Infinity }}
-              style={{
-                fontFamily: "'Cormorant Garamond', serif",
-                fontSize: "16px",
-                color: isDark ? "#E2E8F0" : "#1C1917",
-                filter: isDark
-                  ? "drop-shadow(0 0 8px rgba(226,232,240,0.5))"
-                  : "drop-shadow(0 0 6px rgba(28,25,23,0.25))",
-                lineHeight: 1,
-              }}
-            >
-              ✦
-            </motion.span>
-            <span
-              style={{
-                fontFamily: "'Inter', sans-serif",
-                fontSize: "12px",
-                fontWeight: 500,
-                color: isDark ? "#E2E8F0" : "#1C1917",
-                letterSpacing: "0.02em",
-              }}
-            >
-              {activeCompanionName} Core
-            </span>
-          </div>
-          <span
-            style={{
-              fontFamily: "'Inter', sans-serif",
-              fontSize: "10px",
-              color: isDark ? "#71717A" : "#A8A29E",
-              textTransform: "uppercase",
-              letterSpacing: "0.1em",
-            }}
-          >
-            {mood}
-          </span>
+          <Sparkles size={16} strokeWidth={2.2} />
         </div>
-        {/* Chemistry meter */}
-        <div className="flex items-center gap-2">
-          <div
-            className="flex-1 h-[3px] rounded-full overflow-hidden"
-            style={{
-              background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.08)",
-            }}
-          >
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${chemistry}%` }}
-              transition={{ duration: 1.2, ease: "easeOut" }}
-              className="h-full"
-              style={{
-                background: isDark
-                  ? "linear-gradient(90deg, rgba(226,232,240,0.3), #E2E8F0)"
-                  : "linear-gradient(90deg, rgba(28,25,23,0.3), #1C1917)",
-              }}
-            />
+        <div className="leading-none">
+          <div className="text-[15px] font-bold tracking-[0.14em]">VICES</div>
+          <div className="text-[10px] mt-1" style={{ color: "var(--v-text-faint)" }}>
+            Local AI Agent
           </div>
-          <span
-            style={{
-              fontFamily: "'Inter', sans-serif",
-              fontSize: "10px",
-              color: isDark ? "#71717A" : "#A8A29E",
-              minWidth: "26px",
-              textAlign: "right",
-            }}
-          >
-            {chemistry}%
-          </span>
+        </div>
+      </div>
+
+      {/* Agent status */}
+      <div
+        className="mx-3 mb-3 px-3 py-2.5 rounded-[var(--v-radius)] flex items-center gap-2.5"
+        style={{ background: "var(--v-surface-2)", border: "1px solid var(--v-border)" }}
+      >
+        <StatusDot mood={toneEnabled ? mood : ""} typing={typing} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[12.5px] font-semibold truncate leading-tight">
+            {activeCompanionName}
+          </div>
+          <div className="text-[10.5px] mt-0.5 truncate" style={{ color: "var(--v-text-faint)" }}>
+            {typing ? "responding…" : toneEnabled && mood ? mood : "ready"}
+          </div>
         </div>
       </div>
 
       {/* New conversation */}
-      <button
-        onClick={onNewConversation}
-        className="mx-3 mb-2 px-3 py-2 rounded-lg flex items-center gap-2 transition-colors hover:bg-white/[0.03] active:bg-white/[0.06] text-left"
-        style={{
-          color: isDark ? "#A1A1AA" : "#52525B",
-          fontFamily: "'Inter', sans-serif",
-          fontSize: "12.5px",
-        }}
-      >
-        <Plus size={14} />
-        <span>New conversation</span>
-      </button>
+      <div className="px-3 mb-1">
+        <button
+          onClick={onNewConversation}
+          className="w-full px-3 py-2.5 rounded-[var(--v-radius-sm)] flex items-center gap-2 text-[13px] font-medium transition-all hover:brightness-110 active:scale-[0.99] cursor-pointer"
+          style={{
+            background: "var(--v-accent-soft)",
+            color: "var(--v-accent)",
+            border: "1px solid transparent",
+          }}
+        >
+          <Plus size={15} strokeWidth={2.4} />
+          <span>New conversation</span>
+        </button>
+      </div>
 
       {/* Conversation list */}
-      <div className="flex-1 overflow-y-auto px-3">
+      <div className="flex-1 overflow-y-auto px-3 pb-2 min-h-0">
         <div
-          style={{
-            fontFamily: "'Inter', sans-serif",
-            fontSize: "10px",
-            color: isDark ? "#52525B" : "#A8A29E",
-            textTransform: "uppercase",
-            letterSpacing: "0.1em",
-            padding: "12px 8px 6px",
-          }}
+          className="text-[10px] uppercase tracking-[0.11em] px-2 pt-3 pb-1.5 select-none"
+          style={{ color: "var(--v-text-faint)" }}
         >
           Recent
         </div>
-        {conversations.map((c) => (
-          <div
-            key={c.id}
-            className="w-full relative group mb-0.5 rounded-md flex items-center hover:bg-white/[0.02]"
-          >
-            <button
-              onClick={() => onSelectConversation(c.id)}
-              className="w-full px-3 py-2 flex items-center justify-between gap-2 transition-colors text-left"
-              style={{
-                background:
-                  c.id === activeConversationId
-                    ? isDark
-                      ? "rgba(255,255,255,0.04)"
-                      : "rgba(0,0,0,0.04)"
-                    : "transparent",
-                borderRadius: "6px",
-              }}
-            >
-              <div className="flex items-center gap-2 min-w-0 pr-6">
-                <MessageSquare
-                  size={12}
-                  style={{
-                    color:
-                      c.id === activeConversationId
-                        ? isDark
-                          ? "#E2E8F0"
-                          : "#1C1917"
-                        : isDark
-                        ? "#52525B"
-                        : "#A8A29E",
-                    flexShrink: 0,
-                  }}
-                />
-                <span
-                  className="truncate"
-                  style={{
-                    fontFamily: "'Inter', sans-serif",
-                    fontSize: "12.5px",
-                    color:
-                      c.id === activeConversationId
-                        ? isDark
-                          ? "#E2E8F0"
-                          : "#1C1917"
-                        : isDark
-                        ? "#A1A1AA"
-                        : "#52525B",
-                  }}
-                >
-                  {c.title || "Untitled Conversation"}
-                </span>
-              </div>
-              <span
-                className="group-hover:opacity-0 transition-opacity"
-                style={{
-                  fontFamily: "'Inter', sans-serif",
-                  fontSize: "10px",
-                  color: isDark ? "#52525B" : "#A8A29E",
-                  flexShrink: 0,
-                }}
-              >
-                {c.time}
-              </span>
-            </button>
-            
-            {/* Delete button that shows on hover */}
-            {conversations.length > 1 && (
+        {conversations.map((c) => {
+          const active = c.id === activeConversationId;
+          return (
+            <div key={c.id} className="relative group mb-0.5">
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteConversation(c.id);
+                onClick={() => onSelectConversation(c.id)}
+                className="w-full px-2.5 py-2 rounded-[var(--v-radius-sm)] flex items-center gap-2.5 text-left transition-colors cursor-pointer"
+                style={{
+                  background: active ? "var(--v-surface-2)" : "transparent",
+                  color: active ? "var(--v-text)" : "var(--v-text-muted)",
                 }}
-                className="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-500/10 text-red-500/70 hover:text-red-500"
-                title="Delete Conversation"
               >
-                <Trash2 size={11} />
+                <MessageSquare
+                  size={13}
+                  style={{ color: active ? "var(--v-accent)" : "var(--v-text-faint)", flexShrink: 0 }}
+                />
+                <span className="truncate flex-1 text-[12.5px]">
+                  {c.title || "Untitled conversation"}
+                </span>
+                <span
+                  className="text-[10px] shrink-0 group-hover:opacity-0 transition-opacity"
+                  style={{ color: "var(--v-text-faint)" }}
+                >
+                  {c.time}
+                </span>
               </button>
-            )}
-          </div>
-        ))}
+              {conversations.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteConversation(c.id);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md cursor-pointer"
+                  style={{ color: "var(--v-danger)" }}
+                  title="Delete conversation"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* Footer */}
+      {/* Footer actions */}
       <div
-        className="px-3 py-3 flex items-center justify-between"
-        style={{
-          borderTop: isDark
-            ? "1px solid rgba(255,255,255,0.05)"
-            : "1px solid rgba(0,0,0,0.05)",
-        }}
+        className="px-3 py-2.5 flex items-center justify-between"
+        style={{ borderTop: "1px solid var(--v-border)" }}
       >
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onConfigurePersona}
-            className="p-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:bg-white/[0.04]"
-            style={{ color: isDark ? "#71717A" : "#78716C" }}
-            title="Configure Persona"
-          >
-            <Settings size={14} />
-          </button>
-
-          <button
-            onClick={onShowMemory}
-            className="p-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:bg-white/[0.04]"
-            style={{ color: isDark ? "#71717A" : "#78716C" }}
-            title="Memory Database Diagnostics"
-          >
-            <Database size={14} />
-          </button>
-
-          <button
-            onClick={onShowSettings}
-            className="p-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:bg-white/[0.04]"
-            style={{ color: isDark ? "#71717A" : "#78716C" }}
-            title="Advanced System Config"
-          >
-            <Sliders size={14} />
-          </button>
+        <div className="flex items-center gap-0.5">
+          {onConfigurePersona && (
+            <button
+              onClick={onConfigurePersona}
+              className="p-2 rounded-[var(--v-radius-sm)] transition-colors cursor-pointer hover:bg-[var(--v-surface-2)]"
+              style={{ color: "var(--v-text-muted)" }}
+              title="Personas"
+            >
+              <Settings size={15} />
+            </button>
+          )}
+          {onShowMemory && (
+            <button
+              onClick={onShowMemory}
+              className="p-2 rounded-[var(--v-radius-sm)] transition-colors cursor-pointer hover:bg-[var(--v-surface-2)]"
+              style={{ color: "var(--v-text-muted)" }}
+              title="Memory"
+            >
+              <Database size={15} />
+            </button>
+          )}
+          {onShowSettings && (
+            <button
+              onClick={onShowSettings}
+              className="p-2 rounded-[var(--v-radius-sm)] transition-colors cursor-pointer hover:bg-[var(--v-surface-2)]"
+              style={{ color: "var(--v-text-muted)" }}
+              title="Settings"
+            >
+              <Sliders size={15} />
+            </button>
+          )}
         </div>
-
         <button
           onClick={toggleTheme}
-          className="p-1.5 rounded-md transition-colors flex items-center gap-1.5 hover:bg-white/[0.04]"
-          style={{ color: isDark ? "#71717A" : "#78716C" }}
+          className="p-2 rounded-[var(--v-radius-sm)] transition-colors cursor-pointer hover:bg-[var(--v-surface-2)]"
+          style={{ color: "var(--v-text-muted)" }}
           title="Toggle theme"
         >
-          {isDark ? <Sun size={14} /> : <Moon size={14} />}
+          {isDark ? <Sun size={15} /> : <Moon size={15} />}
         </button>
       </div>
     </aside>
   );
 }
-

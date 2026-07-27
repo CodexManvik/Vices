@@ -35,7 +35,7 @@ import { detectGpu, type GpuInfo } from "../utils/gpuDetector";
 import {
   scanForModels,
   downloadAllModels,
-  NSFW_MODEL_FILES,
+  UNCENSORED_MODEL_FILES,
   SAFE_MODEL_FILES,
   checkModelsExist,
   formatBytes,
@@ -79,8 +79,8 @@ const T = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function totalProgress(files: FileProgress[], nsfw: boolean): { pct: number; done: boolean } {
-  const modelsToDownload = nsfw ? NSFW_MODEL_FILES : SAFE_MODEL_FILES;
+function totalProgress(files: FileProgress[], uncensored: boolean): { pct: number; done: boolean } {
+  const modelsToDownload = uncensored ? UNCENSORED_MODEL_FILES : SAFE_MODEL_FILES;
   const totalBytes = modelsToDownload.reduce(
     (s: number, m: any) => s + m.approximateSizeBytes,
     0
@@ -190,19 +190,19 @@ function DetectingScreen({ dark }: { dark: boolean }) {
 function ChooseScreen({
   dark,
   gpuInfo,
-  nsfw,
-  setNsfw,
+  uncensored,
+  setUncensored,
   onLocal,
   onServer,
 }: {
   dark: boolean;
   gpuInfo: GpuInfo;
-  nsfw: boolean;
-  setNsfw: (val: boolean) => void;
+  uncensored: boolean;
+  setUncensored: (val: boolean) => void;
   onLocal: () => void;
   onServer: () => void;
 }) {
-  const totalSizeBytes = (nsfw ? NSFW_MODEL_FILES : SAFE_MODEL_FILES).reduce(
+  const totalSizeBytes = (uncensored ? UNCENSORED_MODEL_FILES : SAFE_MODEL_FILES).reduce(
     (s: number, m: any) => s + m.approximateSizeBytes,
     0
   );
@@ -298,7 +298,7 @@ function ChooseScreen({
         </div>
       </div>
 
-      {/* NSFW Toggle */}
+      {/* Uncensored Model Toggle */}
       <div
         style={{
           display: "flex",
@@ -321,7 +321,7 @@ function ChooseScreen({
               color: T.text(dark),
             }}
           >
-            Adult / NSFW Local Model
+            Uncensored Local Model (18+ Verified)
           </span>
           <span
             style={{
@@ -330,18 +330,18 @@ function ChooseScreen({
               color: T.muted(dark),
             }}
           >
-            {nsfw
-              ? "Downloads Uncensored Gemma-4 (allows uncensored & mature roleplay)"
-              : "Downloads Standard Gemma-4 (maintains PG-13 content boundaries)"}
+            {uncensored
+              ? "Downloads Uncensored Gemma-4 (requires 18+ age verification)"
+              : "Downloads Standard Gemma-4 (standard model weights)"}
           </span>
         </div>
         <button
-          onClick={() => setNsfw(!nsfw)}
+          onClick={() => setUncensored(!uncensored)}
           style={{
             width: "44px",
             height: "24px",
             borderRadius: "99px",
-            background: nsfw ? T.accent : (dark ? "#222" : "#ddd"),
+            background: uncensored ? T.accent : (dark ? "#222" : "#ddd"),
             border: "none",
             cursor: "pointer",
             position: "relative",
@@ -360,7 +360,7 @@ function ChooseScreen({
               boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
               position: "absolute",
               top: "2px",
-              left: nsfw ? "22px" : "2px",
+              left: uncensored ? "22px" : "2px",
             }}
           />
         </button>
@@ -791,17 +791,17 @@ function ModelFoundScreen({
 function DownloadingScreen({
   dark,
   files,
-  nsfw,
+  uncensored,
   error,
   onCancel,
 }: {
   dark: boolean;
   files: FileProgress[];
-  nsfw: boolean;
+  uncensored: boolean;
   error: string | null;
   onCancel: () => void;
 }) {
-  const overall = totalProgress(files, nsfw);
+  const overall = totalProgress(files, uncensored);
 
   return (
     <motion.div
@@ -857,7 +857,7 @@ function DownloadingScreen({
 
       {/* Per-file entries */}
       <div className="flex flex-col gap-5">
-        {(nsfw ? NSFW_MODEL_FILES : SAFE_MODEL_FILES).map((modelMeta, i) => {
+        {(uncensored ? UNCENSORED_MODEL_FILES : SAFE_MODEL_FILES).map((modelMeta, i) => {
           const f = files[i] ?? {
             downloaded: 0,
             total: modelMeta.approximateSizeBytes,
@@ -1095,19 +1095,19 @@ export function LocalSetup({ isDark: dark, onComplete }: LocalSetupProps) {
   const [gpuInfo, setGpuInfo] = useState<GpuInfo | null>(null);
   const [foundModels, setFoundModels] = useState<string[]>([]);
   const [dlError, setDlError] = useState<string | null>(null);
-  const [nsfw, setNsfw] = useState(false);
+  const [uncensored, setUncensored] = useState(false);
   const { isAdultVerified, requestVerification, gateOpen, handleConfirm, handleDismiss } = useAgeGate();
 
-  // Guarded NSFW toggle — intercepts the enable path through the age gate.
-  const handleNsfwToggle = (val: boolean) => {
+  // Guarded Uncensored model toggle — intercepts the enable path through the age gate.
+  const handleUncensoredToggle = (val: boolean) => {
     if (val && !isAdultVerified) {
-      requestVerification(() => setNsfw(true));
+      requestVerification(() => setUncensored(true));
     } else {
-      setNsfw(val);
+      setUncensored(val);
     }
   };
   const [files, setFiles] = useState<FileProgress[]>(
-    NSFW_MODEL_FILES.map((m) => ({
+    UNCENSORED_MODEL_FILES.map((m) => ({
       downloaded: 0,
       total: m.approximateSizeBytes,
       speedBps: 0,
@@ -1153,7 +1153,7 @@ export function LocalSetup({ isDark: dark, onComplete }: LocalSetupProps) {
   const startDownload = async () => {
     setPhase("downloading");
     setDlError(null);
-    const modelsToDownload = nsfw ? NSFW_MODEL_FILES : SAFE_MODEL_FILES;
+    const modelsToDownload = uncensored ? UNCENSORED_MODEL_FILES : SAFE_MODEL_FILES;
     // Reset file progress
     setFiles(
       modelsToDownload.map((m) => ({
@@ -1168,7 +1168,7 @@ export function LocalSetup({ isDark: dark, onComplete }: LocalSetupProps) {
     abortRef.current = controller;
 
     try {
-      for await (const progress of downloadAllModels(nsfw, controller.signal)) {
+      for await (const progress of downloadAllModels(uncensored, controller.signal)) {
         if (controller.signal.aborted) break;
         setFiles((prev) => {
           const next = [...prev];
@@ -1257,8 +1257,8 @@ export function LocalSetup({ isDark: dark, onComplete }: LocalSetupProps) {
             <ChooseScreen
               dark={dark}
               gpuInfo={gpuInfo}
-              nsfw={nsfw}
-              setNsfw={handleNsfwToggle}
+              uncensored={uncensored}
+              setUncensored={handleUncensoredToggle}
               onLocal={startDownload}
               onServer={handleServerChoice}
             />
@@ -1277,7 +1277,7 @@ export function LocalSetup({ isDark: dark, onComplete }: LocalSetupProps) {
             <DownloadingScreen
               dark={dark}
               files={files}
-              nsfw={nsfw}
+              uncensored={uncensored}
               error={dlError}
               onCancel={cancelDownload}
             />

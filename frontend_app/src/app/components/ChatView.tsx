@@ -1,12 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ArrowDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import {
+  ArrowDown,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Terminal,
+  Database,
+  SlidersHorizontal,
+  Folder,
+  Sparkles,
+  ChevronUp,
+  ChevronDown,
+  X,
+} from "lucide-react";
 import { ChatMessage, Message } from "./ChatMessage";
-import { CommandBar } from "./CommandBar";
-import { calculateLocalEmotionShift } from "../utils/emotionEngine";
+import { PromptBox } from "./PromptBox";
 import { cleanClientShorthand } from "../utils/textCleaner";
 import { extractUrls, fetchUrlContent } from "../utils/urlFetcher";
-
 
 interface ChatViewProps {
   isDark: boolean;
@@ -22,6 +32,10 @@ interface ChatViewProps {
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
   onPlayAudio?: (url: string) => void;
+  onShowSettings?: () => void;
+  onShowMemory?: () => void;
+  toneEnabled?: boolean;
+  activeCompanionName?: string;
 }
 
 function nowTime() {
@@ -42,6 +56,10 @@ export function ChatView({
   isSidebarOpen,
   onToggleSidebar,
   onPlayAudio,
+  onShowSettings,
+  onShowMemory,
+  toneEnabled = false,
+  activeCompanionName = "Rosia",
 }: ChatViewProps) {
   const messageIdRef = useRef<number>(Date.now());
 
@@ -52,6 +70,14 @@ export function ChatView({
   const feedRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+
+  // Codex Terminal Drawer State
+  const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([
+    "[SYSTEM] Vices Agent Kernel initialised.",
+    "[MEMORY] Turbovec vector index & LanceDB graph loaded.",
+    "[COGNITIVE CORE] ONNX emotion engine active on CPU.",
+  ]);
 
   const scrollToBottom = (smooth = true) => {
     if (feedRef.current) {
@@ -105,213 +131,178 @@ export function ChatView({
 
       messageTextBufferRef.current = {};
       messageImageBufferRef.current = {};
-    }, 200);
+    }, 16);
 
     return () => {
-      if (bufferFlushTimerRef.current) {
-        clearInterval(bufferFlushTimerRef.current);
-      }
+      if (bufferFlushTimerRef.current) clearInterval(bufferFlushTimerRef.current);
     };
-  }, [activeConversationId]);
+  }, [setMessages]);
 
   const handleScroll = () => {
     if (!feedRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = feedRef.current;
-    const isBottom = scrollHeight - scrollTop - clientHeight < 100;
-    setAtBottom(isBottom);
-    if (isBottom) setPendingCount(0);
+    const isEnd = scrollHeight - (scrollTop + clientHeight) < 60;
+    setAtBottom(isEnd);
+    if (isEnd) setPendingCount(0);
   };
 
-  const handleSend = async (text: string, image?: { url: string; name: string }, voice?: boolean) => {
-    if (!sessionUrl || typing || !activeConversationId) return;
-    if (!text.trim() && (!image)) return;
+  const addTerminalLog = (log: string) => {
+    setTerminalLogs((prev) => [...prev.slice(-100), `[${nowTime()}] ${log}`]);
+  };
 
-    // --- Task 2: Sanitize shorthand before rendering and network dispatch ---
-    const sanitizedText = cleanClientShorthand(text);
+  const handleSendMessage = async (
+    text: string,
+    image?: { url: string; name: string },
+    opts?: { voice?: boolean; search?: boolean; tools?: boolean },
+  ) => {
+    const voice = opts?.voice;
+    if ((!text || !text.trim()) && !image) return;
 
-    const id = (messageIdRef.current++).toString();
-    const assistantId = (messageIdRef.current++).toString();
-
-    const newMsg: Message = {
-      id,
+    const userMessageId = `usr_${++messageIdRef.current}`;
+    const userMsg: Message = {
+      id: userMessageId,
       role: "user",
-      // Display the sanitized version in the chat bubble
-      text: sanitizedText,
+      text: text.trim(),
+      image: image?.url,
       time: nowTime(),
     };
 
-    setMessages((prev: Message[]) => [
-      ...prev,
-      newMsg,
-      { id: assistantId, role: "rosia", text: "", time: nowTime() },
-    ]);
-
+    setMessages((prev) => [...prev, userMsg]);
     setTyping(true);
-    setAtBottom(true);
-    scrollToBottom(true);
+    addTerminalLog(`USER -> ${text.slice(0, 40)}...`);
+
+    const rosiaMsgId = `ros_${++messageIdRef.current}`;
+    const rosiaMsgPlaceholder: Message = {
+      id: rosiaMsgId,
+      role: "rosia",
+      text: "",
+      time: nowTime(),
+    };
+
+    setMessages((prev) => [...prev, rosiaMsgPlaceholder]);
+
+    // Handle URL extraction & fetching
+    const urls = extractUrls(text);
+    let webContext = "";
+    if (urls.length > 0) {
+      addTerminalLog(`[WEB] Extracting page context from ${urls[0]}...`);
+      const fetched = await fetchUrlContent(urls[0]);
+      webContext = fetched || "";
+    }
+
+    const effectiveText = webContext
+      ? `${text.trim()}\n\n[Web Context from ${urls[0]}]:\n${webContext}`
+      : text.trim();
 
     try {
-      // --- Tasks 1 & 3: Run emotion inference + URL fetching in parallel ---
-      const urls = extractUrls(sanitizedText);
-
-      const [emotionShift, ...urlResults] = await Promise.allSettled([
-        // Task 1: local WASM emotion inference with 2-second timeout guard
-        Promise.race([
-          calculateLocalEmotionShift(sanitizedText),
-          new Promise<{ valence_shift: number; arousal_shift: number }>((resolve) =>
-            setTimeout(() => resolve({ valence_shift: 0, arousal_shift: 0 }), 2000)
-          ),
-        ]),
-        // Task 3: parallel URL content fetches
-        ...urls.map((url) => fetchUrlContent(url)),
-      ]);
-
-      // Unpack emotion shift — fallback to zero on rejection
-      const { valence_shift, arousal_shift } =
-        emotionShift.status === "fulfilled"
-          ? emotionShift.value
-          : { valence_shift: 0, arousal_shift: 0 };
-
-      // Build system note from successfully fetched URL bodies
-      const linkSummaries: string[] = [];
-      urls.forEach((url, idx) => {
-        const result = urlResults[idx];
-        if (result?.status === "fulfilled" && result.value) {
-          linkSummaries.push(`Content from ${url}: ${result.value}`);
-        }
-      });
-
-      let finalInput = sanitizedText.trim();
-      if (linkSummaries.length > 0) {
-        finalInput +=
-          "\n\n[System Note: The user shared links containing the following text:]\n" +
-          linkSummaries.join("\n");
+      if (!sessionUrl) {
+        throw new Error("No backend server URL available.");
       }
-
-      // --- Task 4: Serialize active conversation history for stateless backend ---
-      const MAX_HISTORY = 12;
-      const historyPayload = messages
-        .filter((m: Message) => m.role === "user" || m.role === "rosia")
-        .slice(-MAX_HISTORY)
-        .map((m: Message) => ({
-          role: m.role === "rosia" ? "assistant" : "user",
-          content: m.text,
-        }));
 
       const fd = new FormData();
-      fd.append("user_input", finalInput);
+      fd.append("user_input", effectiveText);
       fd.append("target_model", "default");
       fd.append("voice_requested", voice ? "true" : "false");
-      // Task 1: send client-computed emotion shifts
-      fd.append("client_valence_shift", String(valence_shift));
-      fd.append("client_arousal_shift", String(arousal_shift));
-      // Task 4: send serialized history instead of a conversation_id key
-      fd.append("client_history", JSON.stringify(historyPayload));
+      fd.append(
+        "client_history",
+        JSON.stringify(
+          messages.map((m) => ({
+            role: (m.role as string) === "user" || (m.role as string) === "usr" ? "user" : "assistant",
+            content: m.text,
+          }))
+        )
+      );
 
-      if (image) {
-        const blob = await fetch(image.url).then((r) => r.blob());
-        fd.append("files", blob, image.name);
-      }
-
-      const res = await fetch(`${sessionUrl}/chat`, {
+      const res = await fetch(`${sessionUrl.replace(/\/+$/, "")}/chat`, {
         method: "POST",
         body: fd,
       });
 
-      if (!res.ok || !res.body) throw new Error("Chat core failure");
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
 
-      const reader = res.body.getReader();
+      const reader = res.body?.getReader();
       const decoder = new TextDecoder("utf-8");
 
-      const processChunk = (rawText: string) => {
-        let cleanText = rawText;
-        
-        // Scan for selfie triggers to display pulsing tech-skeleton camera loading panel
-        if (rawText.includes("TRIGGER_SELFIE")) {
-          setMessages((prev) =>
-            prev.map((msg) => {
-              if (msg.id === assistantId) {
-                return { ...msg, imageLoading: true };
-              }
-              return msg;
-            })
-          );
-        }
-        
-        const attachmentRegex = /\[SYSTEM_MEDIA_ATTACHMENT:\s*(file:\/\/[^\]]+)\]/g;
-        let match;
-        while ((match = attachmentRegex.exec(cleanText)) !== null) {
-          const fileUrl = match[1].replace("file://", "");
-          const imageUrl = `${sessionUrl}/images/${fileUrl}`;
-          messageImageBufferRef.current[assistantId] = imageUrl;
-          cleanText = cleanText.replace(match[0], "");
-        }
+      let accumulated = "";
+      let pendingShown = false;
+      if (reader) {
+        let done = false;
+        while (!done) {
+          const { value, done: isDone } = await reader.read();
+          done = isDone;
+          if (value) {
+            const chunk = decoder.decode(value, { stream: true });
+            accumulated += chunk;
 
-        const audioRegex = /\[SYSTEM_AUDIO_ATTACHMENT:\s*(file:\/\/[^\]]+)\]/g;
-        let audioMatch;
-        while ((audioMatch = audioRegex.exec(cleanText)) !== null) {
-          const fileUrl = audioMatch[1].replace("file://", "");
-          const audioUrl = `${sessionUrl}/images/${fileUrl}`;
-          if (onPlayAudio) {
-            onPlayAudio(audioUrl);
-          }
-          cleanText = cleanText.replace(audioMatch[0], "");
-        }
-        
-        if (cleanText) {
-          messageTextBufferRef.current[assistantId] = (
-            messageTextBufferRef.current[assistantId] || ""
-          ) + cleanText;
-        }
-      };
+            // As soon as image generation starts, flip the message into the
+            // animated "generating" card — don't wait for the stream to end.
+            if (!pendingShown && accumulated.includes("[SYSTEM_MEDIA_PENDING]")) {
+              pendingShown = true;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === rosiaMsgId ? { ...m, imageLoading: true } : m))
+              );
+            }
 
-      let done = false;
-      while (!done) {
-        const { value, done: doneReading } = await reader.read();
-        done = doneReading;
-        if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk
-            .split(/\r?\n/)
-            .map((l) => l.trimEnd())
-            .filter((l) => l.startsWith("data:"))
-            .map((l) => l.slice(5).trimStart());
-
-          if (lines.length) {
-            lines.forEach((dl) => processChunk(dl));
-          } else {
-            processChunk(chunk);
+            // Buffer only the user-visible text, never the control markers.
+            const cleanChunk = chunk
+              .replace(/\ndata:\s*\[SYSTEM_MEDIA_PENDING\]\n?/g, "")
+              .replace(/\[SYSTEM_MEDIA_PENDING\]/g, "");
+            messageTextBufferRef.current[rosiaMsgId] =
+              (messageTextBufferRef.current[rosiaMsgId] || "") + cleanChunk;
           }
         }
       }
 
-      const buffered = {
-        ...messageTextBufferRef.current,
-        ...messageImageBufferRef.current,
-      };
-      if (Object.keys(buffered).length) {
+      // ── Post-process attachments the backend embeds in the stream ──
+      // Selfie:  [SYSTEM_MEDIA_ATTACHMENT: file://<name>]  -> message.image
+      // Voice:   [SYSTEM_AUDIO_ATTACHMENT: file://<name>]  -> play TTS audio
+      // Failure: [SYSTEM_MEDIA_FAILED]                     -> clear the card
+      const baseUrl = sessionUrl.replace(/\/+$/, "");
+      const mediaMatch = /\[SYSTEM_MEDIA_ATTACHMENT:\s*file:\/\/([^\]\s]+)\]/.exec(accumulated);
+      const audioMatch = /\[SYSTEM_AUDIO_ATTACHMENT:\s*file:\/\/([^\]\s]+)\]/.exec(accumulated);
+      const mediaFailed = accumulated.includes("[SYSTEM_MEDIA_FAILED]");
+
+      if (mediaMatch || audioMatch || mediaFailed || pendingShown) {
+        // Cancel any pending buffered writes for this message and finalize
+        // its text with all control markers stripped out.
+        delete messageTextBufferRef.current[rosiaMsgId];
+        let cleanedText = accumulated
+          .replace(/\ndata:\s*\[SYSTEM_(MEDIA|AUDIO)_(ATTACHMENT:[^\]]*|PENDING|FAILED)\]\n?/g, "")
+          .replace(/\[SYSTEM_(MEDIA|AUDIO)_(ATTACHMENT:[^\]]*|PENDING|FAILED)\]/g, "")
+          .trim();
+        if (mediaFailed) {
+          cleanedText += (cleanedText ? "\n\n" : "") + "*(couldn't generate the picture this time)*";
+        }
         setMessages((prev) =>
-          prev.map((msg) => {
-            const updated = { ...msg };
-            if (messageTextBufferRef.current[msg.id]) {
-              updated.text = `${updated.text}${messageTextBufferRef.current[msg.id]}`;
-            }
-            if (messageImageBufferRef.current[msg.id]) {
-              updated.image = messageImageBufferRef.current[msg.id];
-              updated.imageLoading = false;
-            }
-            return updated;
-          })
+          prev.map((m) =>
+            m.id === rosiaMsgId
+              ? {
+                  ...m,
+                  text: cleanedText,
+                  image: mediaMatch ? `${baseUrl}/images/${mediaMatch[1]}` : m.image,
+                  imageLoading: false,
+                }
+              : m
+          )
         );
-        messageTextBufferRef.current = {};
-        messageImageBufferRef.current = {};
+        if (mediaMatch) addTerminalLog(`[MEDIA] Selfie attached: ${mediaMatch[1]}`);
+        if (mediaFailed) addTerminalLog(`[MEDIA] Image generation failed.`);
+        if (audioMatch && onPlayAudio) {
+          addTerminalLog(`[VOICE] Playing TTS reply: ${audioMatch[1]}`);
+          onPlayAudio(`${baseUrl}/images/${audioMatch[1]}`);
+        }
       }
-    } catch (e) {
-      console.error(e);
-      const errorMsg = "\n\n*[System Error: Backend connection lost. Ensure the local server is running on port 8000.]*";
-      setMessages((prev: Message[]) =>
-        prev.map((x: Message) =>
-          x.id === assistantId ? { ...x, text: x.text + errorMsg } : x
+      addTerminalLog(`AGENT -> Response completed.`);
+    } catch (e: any) {
+      console.error("Chat request failed:", e);
+      addTerminalLog(`[ERROR] Chat stream failed: ${e?.message || e}`);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === rosiaMsgId
+            ? { ...m, text: "I encountered a local network issue communicating with the AI kernel." }
+            : m
         )
       );
     } finally {
@@ -319,127 +310,213 @@ export function ChatView({
     }
   };
 
-  const handleFeedback = (payload: { messageId: string; prompt: string; response: string }) => {
-    if (!sessionUrl) return;
-    
-    const idx = messages.findIndex((m: Message) => m.id === payload.messageId);
-    const originalPrompt = messages.slice(0, idx).reverse().find((m: Message) => m.role === "user")?.text || "Unknown Context";
-
-    try {
-      fetch(`${sessionUrl}/feedback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_input: originalPrompt,
-          rejected_response: payload.response,
-          chosen_response: "",
-        }),
-      });
-    } catch (e) {
-      console.error("DPO log failed silently", e);
-    }
-  };
-
   return (
-    <div className="flex-1 flex flex-col relative min-w-0 h-full">
-      <header
-        className="h-16 shrink-0 flex items-center justify-between px-8 z-10"
+    <div
+      className="flex-1 flex flex-col h-full relative overflow-hidden select-none"
+      style={{
+        background: "var(--v-bg)",
+        color: "var(--v-text)",
+        fontFamily: "'Inter', sans-serif",
+      }}
+    >
+      {/* ── Header Toolbar ── */}
+      <div
+        className="px-5 py-3 flex items-center justify-between border-b shrink-0 z-10"
         style={{
-          borderBottom: isDark ? "1px solid rgba(255,255,255,0.04)" : "1px solid rgba(0,0,0,0.04)",
+          background: "var(--v-bg-elev)",
+          borderColor: "var(--v-border)",
         }}
       >
-        <div className="flex items-center gap-4">
+        {/* Left Side: Sidebar Toggle & Companion Status */}
+        <div className="flex items-center gap-3">
           <button
             onClick={onToggleSidebar}
-            className="p-1.5 -ml-1 rounded-md transition-colors hover:bg-white/[0.04] active:bg-white/[0.08]"
-            style={{
-              color: isDark ? "#71717A" : "#8E8781",
-              border: isDark ? "1px solid rgba(255,255,255,0.04)" : "1px solid rgba(0,0,0,0.04)",
-              background: isDark ? "rgba(255,255,255,0.01)" : "rgba(0,0,0,0.01)",
-              cursor: "pointer",
-            }}
-            title={isSidebarOpen ? "Close Sidebar" : "Open Sidebar"}
+            className="p-1.5 rounded-lg transition-colors cursor-pointer hover:bg-[var(--v-surface-2)]"
+            style={{ color: "var(--v-text-muted)" }}
+            title={isSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
           >
-            {isSidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+            {isSidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
           </button>
 
-          <div className="flex flex-col justify-center">
-            <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", color: isDark ? "#E2E8F0" : "#1C1917", letterSpacing: "0.02em" }}>
-              Whispers in the Dark
-            </h2>
-            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: "10px", color: isDark ? "#71717A" : "#A8A29E", letterSpacing: "0.05em", marginTop: "2px" }}>
-              Status: <span className="capitalize">{mood} / {tone}</span>
-            </p>
+          <div className="h-4 w-[1px]" style={{ background: "var(--v-border)" }} />
+
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm">{activeCompanionName}</span>
+            <span
+              className="px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider uppercase"
+              style={{
+                background: "var(--v-accent-soft)",
+                color: "var(--v-accent)",
+              }}
+            >
+              Active Agent
+            </span>
           </div>
         </div>
-        
-        {/* Status indicator */}
-        <div className="flex items-center gap-2 pr-2">
-          <span
+
+        {/* Right Side: Quick Action Buttons */}
+        <div className="flex items-center gap-2">
+          {onShowMemory && (
+            <button
+              onClick={onShowMemory}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer hover:bg-[var(--v-surface-2)]"
+              style={{
+                border: "1px solid var(--v-border)",
+                color: "var(--v-text-muted)",
+              }}
+            >
+              <Database size={13} />
+              <span className="hidden sm:inline">Memory</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowTerminalDrawer(!showTerminalDrawer)}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer hover:bg-[var(--v-surface-2)]"
             style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: typing
-                ? "linear-gradient(135deg, #38BDF8, #06B6D4)"
-                : isDark ? "rgba(226,232,240,0.25)" : "rgba(28,25,23,0.2)",
-              boxShadow: typing ? "0 0 8px rgba(56,189,248,0.5)" : "none",
-              animation: typing ? "pulse 1.5s ease-in-out infinite" : "none",
-              display: "inline-block",
-            }}
-          />
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto px-6 md:px-10 pt-6 pb-32 space-y-7 mask-void-scroll scrollbar-hide relative z-0" ref={feedRef} onScroll={handleScroll}>
-        <AnimatePresence initial={false}>
-          {messages.map((m) => (
-            <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}>
-              <ChatMessage message={m} isDark={isDark} onFeedback={handleFeedback} onPreviewImage={onImageInspectTrigger} />
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {typing && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start pl-2">
-            <div className="flex items-center gap-1.5 py-3">
-              {[0, 1, 2].map((i) => (
-                <motion.div
-                  key={i}
-                  className="w-1.5 h-1.5 rounded-full"
-                  animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }}
-                  transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.18 }}
-                  style={{ background: isDark ? "#E2E8F0" : "#1C1917" }}
-                />
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </div>
-
-      <AnimatePresence>
-        {!atBottom && pendingCount > 0 && (
-          <motion.button
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} onClick={() => scrollToBottom(true)}
-            className="absolute left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full shadow-2xl"
-            style={{
-              bottom: "110px",
-              background: isDark ? "rgba(20,20,20,0.8)" : "rgba(255,255,255,0.85)",
-              backdropFilter: "blur(20px)",
-              border: isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.08)",
-              color: isDark ? "#E2E8F0" : "#1C1917",
-              fontFamily: "'Inter', sans-serif",
-              fontSize: "11.5px",
+              border: showTerminalDrawer ? "1px solid var(--v-accent)" : "1px solid var(--v-border)",
+              color: showTerminalDrawer ? "var(--v-accent)" : "var(--v-text-muted)",
+              background: showTerminalDrawer ? "var(--v-accent-soft)" : "transparent",
             }}
           >
-            <ArrowDown size={14} />
-            {pendingCount} New Message{pendingCount > 1 ? "s" : ""}
+            <Terminal size={13} />
+            <span className="hidden sm:inline">Activity</span>
+          </button>
+
+          {onShowSettings && (
+            <button
+              onClick={onShowSettings}
+              className="p-1.5 rounded-lg transition-colors cursor-pointer hover:bg-[var(--v-surface-2)]"
+              style={{ color: "var(--v-text-muted)" }}
+              title="Settings"
+            >
+              <SlidersHorizontal size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Main Chat Feed Scroll Container ── */}
+      <div
+        ref={feedRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-4 sm:px-12 md:px-24 py-6"
+      >
+        <div className="max-w-4xl mx-auto flex flex-col">
+          {messages.length === 0 ? (
+            <div className="h-96 flex flex-col items-center justify-center text-center gap-3 select-none">
+              <div
+                className="w-12 h-12 rounded-2xl flex items-center justify-center mb-2"
+                style={{ background: "var(--v-accent-soft)", color: "var(--v-accent)" }}
+              >
+                <Sparkles size={24} />
+              </div>
+              <h2 className="text-xl font-semibold tracking-tight">
+                How can {activeCompanionName} help you today?
+              </h2>
+              <p className="text-xs max-w-sm leading-relaxed" style={{ color: "var(--v-text-muted)" }}>
+                Local-first AI workspace &amp; companion. Ask questions, run tasks on your files,
+                use the mic to talk — everything stays on this machine.
+              </p>
+            </div>
+          ) : (
+            messages.map((msg, index) => {
+              const prevUserMsg = messages
+                .slice(0, index)
+                .reverse()
+                .find((m) => m.role === "user")?.text;
+
+              return (
+                <ChatMessage
+                  key={msg.id}
+                  message={msg}
+                  previousUserPrompt={prevUserMsg}
+                  isDark={isDark}
+                  onPreviewImage={onImageInspectTrigger}
+                  onDelete={(id) => setMessages((prev) => prev.filter((m) => m.id !== id))}
+                />
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Scroll to bottom floating badge */}
+      <AnimatePresence>
+        {!atBottom && (
+          <motion.button
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            onClick={() => scrollToBottom(true)}
+            className="absolute bottom-24 right-8 p-2.5 rounded-full shadow-lg border backdrop-blur-md flex items-center gap-2 text-xs font-medium z-20"
+            style={{
+              background: isDark ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.9)",
+              borderColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)",
+              color: isDark ? "#F8FAFC" : "#0F172A",
+            }}
+          >
+            <ArrowDown size={14} className="text-sky-400" />
+            {pendingCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-sky-500 text-white font-semibold">
+                {pendingCount}
+              </span>
+            )}
           </motion.button>
         )}
       </AnimatePresence>
 
-      <div className="absolute bottom-8 left-6 right-6 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-[680px] z-50">
-        <CommandBar isDark={isDark} onSend={(text, image, voice) => handleSend(text, image, voice)} disabled={typing || !sessionUrl} />
+      {/* ── Collapsible Terminal Drawer ── */}
+      <AnimatePresence>
+        {showTerminalDrawer && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 180, opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="border-t shrink-0 flex flex-col font-mono text-xs overflow-hidden"
+            style={{
+              background: isDark ? "#060A12" : "#0F172A",
+              borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.1)",
+              color: "#38BDF8",
+            }}
+          >
+            <div className="px-4 py-2 bg-slate-950 flex items-center justify-between border-b border-slate-800 text-[11px] text-slate-400 select-none">
+              <div className="flex items-center gap-2">
+                <Terminal size={12} className="text-sky-400" />
+                <span>VICES KERNEL LOGS</span>
+              </div>
+              <button
+                onClick={() => setShowTerminalDrawer(false)}
+                className="hover:text-white transition-colors"
+              >
+                <X size={13} />
+              </button>
+            </div>
+
+            <div className="flex-1 p-3 overflow-y-auto space-y-1 text-[11.5px] leading-relaxed">
+              {terminalLogs.map((log, i) => (
+                <div key={i} className="whitespace-pre-wrap font-mono">
+                  {log}
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Bottom Input Command Bar ── */}
+      <div className="p-4 sm:px-12 md:px-24 shrink-0">
+        <div className="max-w-4xl mx-auto">
+          <PromptBox
+            onSend={handleSendMessage}
+            disabled={typing}
+            sessionUrl={sessionUrl}
+            placeholder={`Message ${activeCompanionName}…`}
+            tone={mood}
+            toneEnabled={toneEnabled}
+          />
+        </div>
       </div>
     </div>
   );

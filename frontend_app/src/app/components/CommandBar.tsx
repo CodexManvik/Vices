@@ -1,145 +1,123 @@
+/**
+ * CommandBar.tsx — chat input.
+ * - Real voice input: mic button records, local Whisper transcribes into the box.
+ * - Voice-reply toggle: speaker icon asks the backend to speak its answer (TTS).
+ * - Image attach preserved. Styled with --v-* design tokens.
+ */
+
 import { useRef, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ImageIcon, Mic, ArrowUp, X } from "lucide-react";
+import { ImageIcon, Mic, ArrowUp, X, Volume2, Loader2, Square } from "lucide-react";
+import { useVoiceInput } from "../utils/useVoiceInput";
 
 interface CommandBarProps {
   isDark: boolean;
   onSend: (text: string, image?: { url: string; name: string }, voice?: boolean) => void;
   disabled?: boolean;
+  sessionUrl?: string | null;
+  placeholder?: string;
 }
 
-function VoiceWaveform({ isDark }: { isDark: boolean }) {
-  const bars = Array.from({ length: 28 });
+function RecordingWave() {
+  const bars = Array.from({ length: 24 });
   return (
-    <div className="flex-1 flex items-center gap-3 px-2 py-1.5 min-h-[24px]">
-      <div className="flex items-center gap-2 shrink-0">
-        <motion.span
-          animate={{ opacity: [0.4, 1, 0.4] }}
-          transition={{ duration: 1.6, repeat: Infinity }}
-          className="w-1.5 h-1.5 rounded-full"
-          style={{
-            background: isDark ? "#E2E8F0" : "#1C1917",
-            boxShadow: isDark
-              ? "0 0 10px rgba(226,232,240,0.7)"
-              : "0 0 6px rgba(28,25,23,0.3)",
-          }}
-        />
-        <span
-          style={{
-            fontFamily: "'Inter', sans-serif",
-            fontSize: "12px",
-            color: isDark ? "#A1A1AA" : "#52525B",
-            letterSpacing: "0.04em",
-          }}
-        >
-          Listening
-        </span>
-      </div>
-      <div
-        className="flex-1 flex items-center justify-center gap-[3px] h-6"
-        style={{
-          borderTop: isDark
-            ? "1px solid rgba(255,255,255,0.04)"
-            : "1px solid rgba(0,0,0,0.04)",
-          paddingTop: "2px",
-        }}
+    <div className="flex-1 flex items-center gap-3 px-2 min-h-[36px]">
+      <span
+        className="text-[12px] font-medium shrink-0"
+        style={{ color: "var(--v-danger)" }}
       >
+        ● Recording
+      </span>
+      <div className="flex-1 flex items-center justify-center gap-[3px] h-6">
         {bars.map((_, i) => (
           <motion.span
             key={i}
-            className="block w-[2px] rounded-full"
-            animate={{
-              height: [
-                "20%",
-                `${30 + Math.random() * 70}%`,
-                `${20 + Math.random() * 50}%`,
-                "20%",
-              ],
-            }}
+            className="block w-[2.5px] rounded-full"
+            animate={{ height: ["18%", `${35 + Math.random() * 60}%`, "18%"] }}
             transition={{
-              duration: 0.9 + (i % 5) * 0.12,
+              duration: 0.8 + (i % 5) * 0.1,
               repeat: Infinity,
-              delay: i * 0.04,
+              delay: i * 0.03,
               ease: "easeInOut",
             }}
-            style={{
-              background: isDark
-                ? "rgba(226,232,240,0.7)"
-                : "rgba(28,25,23,0.6)",
-              minHeight: "2px",
-            }}
+            style={{ background: "var(--v-danger)", minHeight: "3px", opacity: 0.85 }}
           />
         ))}
       </div>
+      <span className="text-[11px] shrink-0" style={{ color: "var(--v-text-faint)" }}>
+        click ■ to finish
+      </span>
     </div>
   );
 }
 
-export function CommandBar({ isDark, onSend, disabled }: CommandBarProps) {
+export function CommandBar({ isDark, onSend, disabled, sessionUrl = null, placeholder = "Message your agent…" }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [image, setImage] = useState<{ url: string; name: string } | null>(null);
-  const [voice, setVoice] = useState(false);
+  const [speakReply, setSpeakReply] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const canSend = (value.trim().length > 0 || !!image) && !disabled;
+  const {
+    state: voiceState,
+    error: voiceError,
+    startRecording,
+    stopRecording,
+  } = useVoiceInput({
+    sessionUrl,
+    onTranscript: (text) => {
+      setValue((v) => (v ? `${v} ${text}` : text));
+      setTimeout(() => taRef.current?.focus(), 50);
+    },
+  });
+
+  const canSend = (value.trim().length > 0 || !!image) && !disabled && voiceState === "idle";
+  const isRecording = voiceState === "recording";
+  const isTranscribing = voiceState === "transcribing";
 
   useEffect(() => {
     if (taRef.current) {
       taRef.current.style.height = "auto";
-      taRef.current.style.height = Math.min(taRef.current.scrollHeight, 160) + "px";
+      taRef.current.style.height = Math.min(taRef.current.scrollHeight, 180) + "px";
     }
   }, [value]);
 
-  // Cleanup blob URL on unmount or image change
   useEffect(() => {
     return () => {
-      if (image?.url.startsWith("blob:")) {
-        URL.revokeObjectURL(image.url);
-      }
+      if (image?.url.startsWith("blob:")) URL.revokeObjectURL(image.url);
     };
   }, [image?.url]);
 
   const handleSend = () => {
     if (!canSend) return;
-    onSend(value.trim(), image ?? undefined, voice);
+    onSend(value.trim(), image ?? undefined, speakReply);
     setValue("");
     setImage(null);
-    setVoice(false);
   };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    // Revoke previous blob URL if it exists
-    if (image?.url.startsWith("blob:")) {
-      URL.revokeObjectURL(image.url);
-    }
-    const url = URL.createObjectURL(f);
-    setImage({ url, name: f.name });
+    if (image?.url.startsWith("blob:")) URL.revokeObjectURL(image.url);
+    setImage({ url: URL.createObjectURL(f), name: f.name });
     e.target.value = "";
   };
 
   return (
-    <div className="absolute left-1/2 -translate-x-1/2 bottom-6 z-30 w-[min(720px,calc(100%-48px))] pointer-events-auto">
+    <div className="w-full">
       <motion.div
-        initial={{ opacity: 0, y: 16 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className="rounded-2xl overflow-hidden"
+        transition={{ duration: 0.4 }}
+        className="rounded-[var(--v-radius)] overflow-hidden"
         style={{
-          background: isDark ? "rgba(0,0,0,0.4)" : "rgba(255,255,255,0.6)",
-          backdropFilter: "blur(40px) saturate(180%)",
-          WebkitBackdropFilter: "blur(40px) saturate(180%)",
-          border: isDark
-            ? "1px solid rgba(255,255,255,0.08)"
-            : "1px solid rgba(0,0,0,0.08)",
-          boxShadow: isDark
-            ? "0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)"
-            : "0 16px 40px rgba(0,0,0,0.12)",
+          background: "var(--v-surface)",
+          border: `1px solid ${isRecording ? "var(--v-danger)" : "var(--v-border-strong)"}`,
+          boxShadow: "var(--v-shadow)",
+          transition: "border-color 0.25s",
         }}
       >
-        {/* Image preview */}
+        {/* Image preview chip */}
         <AnimatePresence>
           {image && (
             <motion.div
@@ -149,38 +127,25 @@ export function CommandBar({ isDark, onSend, disabled }: CommandBarProps) {
               className="px-3 pt-3"
             >
               <div
-                className="inline-flex items-center gap-2 p-1.5 pr-3 rounded-lg"
-                style={{
-                  background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
-                  border: isDark
-                    ? "1px solid rgba(255,255,255,0.06)"
-                    : "1px solid rgba(0,0,0,0.06)",
-                }}
+                className="inline-flex items-center gap-2 p-1.5 pr-3 rounded-[var(--v-radius-sm)]"
+                style={{ background: "var(--v-surface-2)", border: "1px solid var(--v-border)" }}
               >
                 <img
                   src={image.url}
                   alt=""
                   className="w-10 h-10 object-cover rounded-md"
-                  style={{
-                    border: isDark
-                      ? "1px solid rgba(226,232,240,0.15)"
-                      : "1px solid rgba(28,25,23,0.1)",
-                  }}
+                  style={{ border: "1px solid var(--v-border)" }}
                 />
                 <span
-                  className="max-w-[220px] truncate"
-                  style={{
-                    fontFamily: "'Inter', sans-serif",
-                    fontSize: "12px",
-                    color: isDark ? "#A1A1AA" : "#52525B",
-                  }}
+                  className="max-w-[220px] truncate text-[12px]"
+                  style={{ color: "var(--v-text-muted)" }}
                 >
                   {image.name}
                 </span>
                 <button
                   onClick={() => setImage(null)}
-                  className="p-0.5 rounded-md transition-colors"
-                  style={{ color: isDark ? "#71717A" : "#78716C" }}
+                  className="p-0.5 rounded-md cursor-pointer"
+                  style={{ color: "var(--v-text-faint)" }}
                 >
                   <X size={13} />
                 </button>
@@ -189,45 +154,73 @@ export function CommandBar({ isDark, onSend, disabled }: CommandBarProps) {
           )}
         </AnimatePresence>
 
-        <div className="flex items-end gap-1 px-3 py-2.5">
-          {/* Left icons */}
-          <div className="flex items-center gap-0.5 pb-1.5">
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFile}
-            />
+        {/* STT error strip */}
+        <AnimatePresence>
+          {voiceError && voiceState === "error" && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="px-4 pt-2 text-[11.5px]"
+              style={{ color: "var(--v-danger)" }}
+            >
+              {voiceError}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="flex items-end gap-1.5 px-3 py-2.5">
+          {/* Attach */}
+          <div className="flex items-center gap-0.5 pb-1">
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
             <button
               onClick={() => fileRef.current?.click()}
-              className="p-1.5 rounded-md transition-colors"
-              style={{ color: isDark ? "#71717A" : "#78716C" }}
+              disabled={isRecording || isTranscribing}
+              className="p-2 rounded-[var(--v-radius-sm)] transition-colors cursor-pointer hover:bg-[var(--v-surface-2)] disabled:opacity-40"
+              style={{ color: "var(--v-text-muted)" }}
               title="Attach image"
             >
-              <ImageIcon size={16} />
+              <ImageIcon size={17} />
             </button>
+
+            {/* Mic — records, transcribes locally */}
             <button
-              onClick={() => setVoice((v) => !v)}
-              className="p-1.5 rounded-md transition-colors"
-              style={{
-                color: voice
-                  ? isDark ? "#E2E8F0" : "#1C1917"
-                  : isDark ? "#71717A" : "#78716C",
-              }}
-              title="Voice"
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isTranscribing || !!disabled}
+              className="p-2 rounded-[var(--v-radius-sm)] transition-colors cursor-pointer hover:bg-[var(--v-surface-2)] disabled:opacity-40"
+              style={{ color: isRecording ? "var(--v-danger)" : "var(--v-text-muted)" }}
+              title={isRecording ? "Stop recording" : "Voice input (local Whisper)"}
             >
-              <Mic size={16} />
+              {isRecording ? (
+                <Square size={17} fill="currentColor" />
+              ) : isTranscribing ? (
+                <Loader2 size={17} className="animate-spin" />
+              ) : (
+                <Mic size={17} />
+              )}
+            </button>
+
+            {/* Speak-reply toggle (TTS) */}
+            <button
+              onClick={() => setSpeakReply((v) => !v)}
+              className="p-2 rounded-[var(--v-radius-sm)] transition-colors cursor-pointer hover:bg-[var(--v-surface-2)]"
+              style={{
+                color: speakReply ? "var(--v-accent)" : "var(--v-text-muted)",
+                background: speakReply ? "var(--v-accent-soft)" : "transparent",
+              }}
+              title={speakReply ? "Voice replies ON" : "Voice replies OFF"}
+            >
+              <Volume2 size={17} />
             </button>
           </div>
 
-          {/* Textarea OR voice waveform */}
-          {voice ? (
-            <VoiceWaveform isDark={isDark} />
+          {/* Input area / recording wave */}
+          {isRecording ? (
+            <RecordingWave />
           ) : (
             <textarea
               ref={taRef}
-              value={value}
+              value={isTranscribing ? "Transcribing…" : value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -236,22 +229,21 @@ export function CommandBar({ isDark, onSend, disabled }: CommandBarProps) {
                 }
               }}
               rows={1}
-              placeholder="Message Rosia..."
-              disabled={disabled}
-              className="flex-1 resize-none bg-transparent outline-none py-1.5 px-1"
+              placeholder={placeholder}
+              disabled={disabled || isTranscribing}
+              className="flex-1 resize-none bg-transparent outline-none py-2 px-1 text-[14px]"
               style={{
-                fontFamily: "'Inter', sans-serif",
-                fontSize: "14.5px",
-                color: isDark ? "#E2E8F0" : "#1C1917",
-                lineHeight: 1.5,
-                minHeight: "24px",
-                maxHeight: "160px",
+                color: isTranscribing ? "var(--v-text-faint)" : "var(--v-text)",
+                lineHeight: 1.55,
+                minHeight: "36px",
+                maxHeight: "180px",
+                fontStyle: isTranscribing ? "italic" : "normal",
               }}
             />
           )}
 
-          {/* Send button - fades in */}
-          <div className="pb-0.5 w-9 h-9 flex items-center justify-center">
+          {/* Send */}
+          <div className="pb-0.5 w-10 h-10 flex items-center justify-center shrink-0">
             <AnimatePresence>
               {canSend && (
                 <motion.button
@@ -259,24 +251,29 @@ export function CommandBar({ isDark, onSend, disabled }: CommandBarProps) {
                   initial={{ opacity: 0, scale: 0.7 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.7 }}
-                  transition={{ duration: 0.18 }}
+                  transition={{ duration: 0.15 }}
                   onClick={handleSend}
-                  className="w-8 h-8 rounded-full flex items-center justify-center"
+                  className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-90"
                   style={{
-                    background: isDark ? "#E2E8F0" : "#1C1917",
-                    color: isDark ? "#0A0A0A" : "#F5F5F4",
-                    boxShadow: isDark
-                      ? "0 0 16px rgba(226,232,240,0.3)"
-                      : "0 4px 12px rgba(0,0,0,0.2)",
+                    background: "var(--v-accent)",
+                    color: "var(--v-accent-contrast)",
+                    boxShadow: "0 4px 14px var(--v-accent-soft)",
                   }}
+                  title="Send"
                 >
-                  <ArrowUp size={15} strokeWidth={2.5} />
+                  <ArrowUp size={16} strokeWidth={2.6} />
                 </motion.button>
               )}
             </AnimatePresence>
           </div>
         </div>
       </motion.div>
+      <div
+        className="text-center text-[10.5px] mt-2 select-none"
+        style={{ color: "var(--v-text-faint)" }}
+      >
+        Local-first · your data never leaves this machine
+      </div>
     </div>
   );
 }

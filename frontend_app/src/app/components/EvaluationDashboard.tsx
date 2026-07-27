@@ -120,7 +120,7 @@ export function EvaluationDashboard({ isDark, sessionUrl, adminPassword }: Evalu
               </span>
             </div>
             <p className="text-xs mt-1" style={{ color: textMuted }}>
-              System evaluation metrics covering DGBA rule adherence, persona style similarity, and security audit logs.
+              System evaluation metrics covering RSM rule adherence, persona style similarity, and security audit logs.
             </p>
           </div>
         </div>
@@ -166,7 +166,7 @@ export function EvaluationDashboard({ isDark, sessionUrl, adminPassword }: Evalu
           {/* Top Score Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="p-5 rounded-2xl border flex flex-col gap-1" style={{ background: cardBg, borderColor: cardBorder }}>
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-purple-400">DGBA Approval Rate</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-purple-400">RSM Approval Rate</span>
               <span className="text-3xl font-bold font-mono" style={{ color: textPrimary }}>
                 {Math.round((metrics.rule_engine?.approval_rate || 0) * 100)}%
               </span>
@@ -208,12 +208,12 @@ export function EvaluationDashboard({ isDark, sessionUrl, adminPassword }: Evalu
 
           {/* Module Deep Dives */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* DGBA Rule Engine Metrics */}
+            {/* RSM Rule Engine Metrics */}
             <div className="p-6 rounded-2xl border flex flex-col gap-4" style={{ background: cardBg, borderColor: cardBorder }}>
               <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: cardBorder }}>
                 <BrainCircuit size={18} className="text-purple-400" />
                 <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>
-                  DGBA Meta-Cognitive Directives
+                  RSM Meta-Cognitive Directives
                 </h3>
               </div>
 

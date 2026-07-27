@@ -22,7 +22,6 @@ import {
   Check,
 } from "lucide-react";
 import { PersonaSetup } from "./PersonaSetup";
-import { useAgeGate, AgeGateModal } from "./AgeGateModal";
 import { PersonaDistillationWizard } from "./PersonaDistillationWizard";
 
 export interface Companion {
@@ -33,11 +32,8 @@ export interface Companion {
   relationship_style: string;
   custom_description: string;
   user_name: string;
-  nsfw: boolean;
+  uncensored?: boolean;
   physical_traits?: {
-    hips_size?: string;
-    waist_size?: string;
-    bust_size?: string;
     skin_tone?: string;
     hair_color?: string;
     eye_color?: string;
@@ -95,19 +91,6 @@ export function PersonaConfig({
   const [editStyle, setEditStyle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editUserName, setEditUserName] = useState("");
-  const [editNsfw, setEditNsfw] = useState(false);
-  const { isAdultVerified, requestVerification, gateOpen, handleConfirm, handleDismiss } = useAgeGate();
-
-  const handleEditNsfwToggle = () => {
-    if (!editNsfw && !isAdultVerified) {
-      requestVerification(() => setEditNsfw(true));
-    } else {
-      setEditNsfw((n) => !n);
-    }
-  };
-  const [editHips, setEditHips] = useState("");
-  const [editWaist, setEditWaist] = useState("");
-  const [editBust, setEditBust] = useState("");
   const [editSkin, setEditSkin] = useState("");
   const [editHair, setEditHair] = useState("");
   const [editEye, setEditEye] = useState("");
@@ -207,12 +190,8 @@ export function PersonaConfig({
     setEditStyle(companion.relationship_style);
     setEditDesc(companion.custom_description);
     setEditUserName(companion.user_name);
-    setEditNsfw(companion.nsfw);
     
     const pt = companion.physical_traits || {};
-    setEditHips(pt.hips_size || "natural");
-    setEditWaist(pt.waist_size || "slim");
-    setEditBust(pt.bust_size || "average");
     setEditSkin(pt.skin_tone || "fair");
     setEditHair(pt.hair_color || "brunette");
     setEditEye(pt.eye_color || "brown");
@@ -238,17 +217,12 @@ export function PersonaConfig({
         relationship_style: editStyle,
         custom_description: editDesc,
         user_name: editUserName,
-        nsfw: editNsfw,
-        physical_traits: editNsfw
-          ? {
-              hips_size: editHips,
-              waist_size: editWaist,
-              bust_size: editBust,
-              skin_tone: editSkin,
-              hair_color: editHair,
-              eye_color: editEye,
-            }
-          : null,
+        uncensored: false,
+        physical_traits: {
+          skin_tone: editSkin,
+          hair_color: editHair,
+          eye_color: editEye,
+        },
         regenerate_prompt: regeneratePrompt,
       };
 
@@ -426,7 +400,7 @@ export function PersonaConfig({
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    {/* ── Built-in Rosia Card (always first, cannot be deleted) ── */}
+                    {/* ── Built-in Rosia Card ── */}
                     {(() => {
                       const isRosiaActive = activeId === ROSIA_BUILTIN_ID;
                       return (
@@ -466,26 +440,15 @@ export function PersonaConfig({
                                 Built-in
                               </span>
                             </div>
-                            <span style={{ fontSize: "11px", color: T.muted(isDark) }}>Female · Adaptive AI</span>
+                            <span style={{ fontSize: "11px", color: T.muted(isDark) }}>Female · AI Companion</span>
                           </div>
                           <div className="flex flex-col gap-2" style={{ fontSize: "12px", borderTop: `1px solid ${T.separator(isDark)}`, paddingTop: "12px" }}>
-                            <div className="flex justify-between mt-1">
-                              <span style={{ color: T.muted(isDark) }}>Relationship style:</span>
-                              <span className="font-medium">Intimate companion</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span style={{ color: T.muted(isDark) }}>Safety Boundaries:</span>
-                              <span className="font-medium">Context-aware</span>
-                            </div>
-                            <div className="flex flex-col gap-1 mt-1">
-                              <span style={{ color: T.muted(isDark) }}>Personality / Backstory:</span>
-                              <span className="line-clamp-2 text-xs italic" style={{ color: T.dim(isDark), lineHeight: 1.4 }}>
-                                "Hardcoded core persona. Deeply curious, emotionally present, and brutally honest."
-                              </span>
-                            </div>
+                            <span style={{ color: T.muted(isDark), lineHeight: 1.5 }}>
+                              Warm, witty, emotionally present, and engaging companion.
+                            </span>
                           </div>
                           <div className="flex justify-end gap-2 mt-2">
-                            <span style={{ fontSize: "11px", color: T.dim(isDark), fontStyle: "italic" }}>Hardcoded · cannot be edited</span>
+                            <span style={{ fontSize: "11px", color: T.dim(isDark), fontStyle: "italic" }}>Hardcoded · built-in companion</span>
                           </div>
                         </div>
                       );
@@ -535,10 +498,6 @@ export function PersonaConfig({
                               <span style={{ color: T.muted(isDark) }}>Relationship style:</span>
                               <span className="font-medium">{companion.relationship_style}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span style={{ color: T.muted(isDark) }}>Safety Boundaries:</span>
-                              <span className="font-medium">{companion.nsfw ? "Adult / NSFW" : "PG-13"}</span>
-                            </div>
                             <div className="flex flex-col gap-1 mt-1">
                               <span style={{ color: T.muted(isDark) }}>Personality / Backstory:</span>
                               <span className="line-clamp-2 text-xs italic" style={{ color: T.dim(isDark), lineHeight: 1.4 }}>
@@ -546,17 +505,17 @@ export function PersonaConfig({
                               </span>
                             </div>
 
-                            {companion.nsfw && companion.physical_traits && (
+                            {companion.physical_traits && (
                               <div className="flex flex-wrap gap-1.5 mt-2">
                                 {Object.entries(companion.physical_traits)
-                                  .filter(([_, val]) => val && val !== "natural" && val !== "average" && val !== "slim")
+                                  .filter(([_, val]) => val && val.trim())
                                   .map(([key, val]) => (
                                     <span
                                       key={key}
                                       className="px-2 py-0.5 rounded text-[10px]"
                                       style={{ background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.035)", border: `1px solid ${T.cardBorder(isDark)}` }}
                                     >
-                                      {val} {key.replace("_size", "").replace("color", "")}
+                                      {val} {key.replace("color", "")}
                                     </span>
                                   ))}
                               </div>
@@ -603,7 +562,6 @@ export function PersonaConfig({
               )}
             </div>
           ) : (
-            /* Edit companion form */
             <form onSubmit={handleEditSubmit} className="flex flex-col gap-5 max-w-2xl mx-auto">
               <h3 style={{ fontSize: "16px", fontWeight: 500 }}>Edit Companion Profile</h3>
 
@@ -705,28 +663,6 @@ export function PersonaConfig({
                     required
                   />
                 </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label style={{ fontSize: "11px", color: T.muted(isDark), textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    Safety Settings
-                  </label>
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      type="button"
-                      onClick={handleEditNsfwToggle}
-                      className="w-[42px] h-[22px] rounded-full p-0.5 transition-colors relative outline-none shrink-0"
-                      style={{ background: editNsfw ? T.accent : isDark ? "#3F3F46" : "#E4E4E7" }}
-                    >
-                      <motion.div
-                        layout
-                        className="w-[18px] h-[18px] rounded-full bg-white shadow-md"
-                        animate={{ x: editNsfw ? 20 : 0 }}
-                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                      />
-                    </button>
-                    <span style={{ fontSize: "13px" }}>{editNsfw ? "Uncensored Adult Content" : "PG-13 Content Guardrails"}</span>
-                  </div>
-                </div>
               </div>
 
               <div className="flex flex-col gap-1.5">
@@ -746,77 +682,43 @@ export function PersonaConfig({
                 />
               </div>
 
-              {editNsfw && (
-                <div className="flex flex-col gap-3 p-4 rounded-xl" style={{ background: isDark ? "rgba(255,255,255,0.01)" : "rgba(0,0,0,0.015)", border: `1px solid ${T.cardBorder(isDark)}` }}>
-                  <span style={{ fontSize: "11.5px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: T.muted(isDark) }}>
-                    Physical attributes details
-                  </span>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Bust Size</span>
-                      <input
-                        type="text"
-                        value={editBust}
-                        onChange={(e) => setEditBust(e.target.value)}
-                        className="px-3 py-1.5 rounded text-xs outline-none"
-                        style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Waist Size</span>
-                      <input
-                        type="text"
-                        value={editWaist}
-                        onChange={(e) => setEditWaist(e.target.value)}
-                        className="px-3 py-1.5 rounded text-xs outline-none"
-                        style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Hips Size</span>
-                      <input
-                        type="text"
-                        value={editHips}
-                        onChange={(e) => setEditHips(e.target.value)}
-                        className="px-3 py-1.5 rounded text-xs outline-none"
-                        style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
-                      />
-                    </div>
+              <div className="flex flex-col gap-3 p-4 rounded-xl" style={{ background: isDark ? "rgba(255,255,255,0.01)" : "rgba(0,0,0,0.015)", border: `1px solid ${T.cardBorder(isDark)}` }}>
+                <span style={{ fontSize: "11.5px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: T.muted(isDark) }}>
+                  Physical Appearance Attributes
+                </span>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Skin Tone</span>
+                    <input
+                      type="text"
+                      value={editSkin}
+                      onChange={(e) => setEditSkin(e.target.value)}
+                      className="px-3 py-1.5 rounded text-xs outline-none"
+                      style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
+                    />
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Skin Tone</span>
-                      <input
-                        type="text"
-                        value={editSkin}
-                        onChange={(e) => setEditSkin(e.target.value)}
-                        className="px-3 py-1.5 rounded text-xs outline-none"
-                        style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Hair Color</span>
-                      <input
-                        type="text"
-                        value={editHair}
-                        onChange={(e) => setEditHair(e.target.value)}
-                        className="px-3 py-1.5 rounded text-xs outline-none"
-                        style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Eye Color</span>
-                      <input
-                        type="text"
-                        value={editEye}
-                        onChange={(e) => setEditEye(e.target.value)}
-                        className="px-3 py-1.5 rounded text-xs outline-none"
-                        style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
-                      />
-                    </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Hair Color</span>
+                    <input
+                      type="text"
+                      value={editHair}
+                      onChange={(e) => setEditHair(e.target.value)}
+                      className="px-3 py-1.5 rounded text-xs outline-none"
+                      style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px]" style={{ color: T.muted(isDark) }}>Eye Color</span>
+                    <input
+                      type="text"
+                      value={editEye}
+                      onChange={(e) => setEditEye(e.target.value)}
+                      className="px-3 py-1.5 rounded text-xs outline-none"
+                      style={{ background: isDark ? "#1A1A1A" : "#FFFFFF", border: `1px solid ${T.cardBorder(isDark)}`, color: T.text(isDark) }}
+                    />
                   </div>
                 </div>
-              )}
+              </div>
 
               <div className="flex items-center gap-2 mt-1">
                 <input
@@ -857,13 +759,6 @@ export function PersonaConfig({
         </div>
       </motion.div>
     </div>
-
-    <AgeGateModal
-      open={gateOpen}
-      isDark={isDark}
-      onConfirm={handleConfirm}
-      onDismiss={handleDismiss}
-    />
 
     {distillCompanion && (
       <PersonaDistillationWizard

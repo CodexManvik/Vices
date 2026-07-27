@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, CheckCircle, XCircle, Clock, Copy, Check, Loader2, Lock, Eye, EyeOff } from "lucide-react";
 import { RuleReviewPanel } from "./RuleReviewPanel";
+import { SkillReviewPanel } from "./SkillReviewPanel";
 import { TransactionLogPanel } from "./TransactionLogPanel";
 import { PermissionManifestEditor } from "./PermissionManifestEditor";
 import { EvaluationDashboard } from "./EvaluationDashboard";
@@ -47,7 +48,7 @@ export function AdminDashboard({ isDark, onBack, sessionUrl }: AdminDashboardPro
   const [authenticating, setAuthenticating] = useState(false);
 
   // Tabs: waitlist, dpo, rules, transactions, permissions, or eval
-  const [activeTab, setActiveTab] = useState<"waitlist" | "dpo" | "rules" | "transactions" | "permissions" | "eval">("waitlist");
+  const [activeTab, setActiveTab] = useState<"waitlist" | "dpo" | "rules" | "skills" | "transactions" | "permissions" | "eval">("waitlist");
 
   // DPO Alignment States
   const [preferences, setPreferences] = useState<any[]>([]);
@@ -665,7 +666,20 @@ export function AdminDashboard({ isDark, onBack, sessionUrl }: AdminDashboardPro
                 border: "none",
               }}
             >
-              <span>DGBA Rule Directives</span>
+              <span>RSM Rule Directives</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("skills")}
+              className="py-3 px-2 text-xs font-semibold tracking-widest uppercase transition-all duration-300 relative flex items-center gap-1.5"
+              style={{
+                color: activeTab === "skills" ? (isDark ? "#E2E8F0" : "#1C1917") : (isDark ? "#52525B" : "#A8A29E"),
+                borderBottom: activeTab === "skills" ? `2px solid ${isDark ? "#8B5CF6" : "#7C3AED"}` : "none",
+                cursor: "pointer",
+                background: "transparent",
+                border: "none",
+              }}
+            >
+              <span>RSM Skill Library</span>
             </button>
             <button
               onClick={() => setActiveTab("transactions")}
@@ -1269,6 +1283,13 @@ export function AdminDashboard({ isDark, onBack, sessionUrl }: AdminDashboardPro
           )}
           {activeTab === "rules" && (
             <RuleReviewPanel
+              isDark={isDark}
+              sessionUrl={sessionUrl}
+              adminPassword={password}
+            />
+          )}
+          {activeTab === "skills" && (
+            <SkillReviewPanel
               isDark={isDark}
               sessionUrl={sessionUrl}
               adminPassword={password}

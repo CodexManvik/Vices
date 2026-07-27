@@ -25,9 +25,6 @@ import {
 import { useAgeGate, AgeGateModal } from "./AgeGateModal";
 
 interface PhysicalTraits {
-  hips_size?: string;
-  waist_size?: string;
-  bust_size?: string;
   skin_tone?: string;
   hair_color?: string;
   eye_color?: string;
@@ -73,27 +70,12 @@ export function PersonaSetup({
   const [name, setName] = useState("Rosia");
   const [gender, setGender] = useState("female");
   const [age, setAge] = useState(18);
-  const [relationshipStyle, setRelationshipStyle] = useState("Intimate");
+  const [relationshipStyle, setRelationshipStyle] = useState("Companion");
   const [customStyleText, setCustomStyleText] = useState("");
   const [customDescription, setCustomDescription] = useState("");
   const [userName, setUserName] = useState("User");
-  // NSFW defaults OFF — user must pass age verification to enable.
-  const [nsfw, setNsfw] = useState(false);
-  const { isAdultVerified, requestVerification, gateOpen, handleConfirm, handleDismiss } = useAgeGate();
-
-  const handleNsfwToggle = () => {
-    if (!nsfw && !isAdultVerified) {
-      // Turning on while not verified — open the gate first.
-      requestVerification(() => setNsfw(true));
-    } else {
-      setNsfw((n) => !n);
-    }
-  };
 
   // Physical traits states
-  const [hipsSize, setHipsSize] = useState("natural");
-  const [waistSize, setWaistSize] = useState("slim");
-  const [bustSize, setBustSize] = useState("average");
   const [skinTone, setSkinTone] = useState("fair");
   const [hairColor, setHairColor] = useState("brunette");
   const [eyeColor, setEyeColor] = useState("brown");
@@ -130,10 +112,7 @@ export function PersonaSetup({
 
   const handleNext = () => {
     if (validateStep()) {
-      if (step === 4 && !nsfw) {
-        // Skip physical traits step if NSFW is off
-        handleSubmit();
-      } else if (step === 5) {
+      if (step === 4) {
         handleSubmit();
       } else {
         setStep((s) => s + 1);
@@ -143,11 +122,7 @@ export function PersonaSetup({
 
   const handlePrev = () => {
     setError(null);
-    if (step === 5 && !nsfw) {
-      setStep(4);
-    } else {
-      setStep((s) => Math.max(1, s - 1));
-    }
+    setStep((s) => Math.max(1, s - 1));
   };
 
   const handleSubmit = async () => {
@@ -177,16 +152,11 @@ export function PersonaSetup({
 
     try {
       const baseUrl = (sessionUrl || "http://localhost:8000").replace(/\/+$/, "");
-      const physical_traits: PhysicalTraits = nsfw
-        ? {
-            hips_size: hipsSize,
-            waist_size: waistSize,
-            bust_size: bustSize,
-            skin_tone: skinTone,
-            hair_color: hairColor,
-            eye_color: eyeColor,
-          }
-        : {};
+      const physical_traits: PhysicalTraits = {
+        skin_tone: skinTone,
+        hair_color: hairColor,
+        eye_color: eyeColor,
+      };
 
       const payload = {
         name,
@@ -195,7 +165,7 @@ export function PersonaSetup({
         relationship_style: activeRelStyle,
         custom_description: customDescription,
         user_name: userName,
-        nsfw,
+        uncensored: false,
         physical_traits,
       };
 
@@ -331,7 +301,7 @@ export function PersonaSetup({
                 </span>
               </div>
               <span style={{ fontSize: "11px", color: T.muted(isDark), letterSpacing: "0.1em" }}>
-                STEP {step} OF {nsfw ? 5 : 4}
+                STEP {step} OF 4
               </span>
             </div>
 
@@ -555,136 +525,12 @@ export function PersonaSetup({
                     exit={{ opacity: 0, x: -10 }}
                     className="flex flex-col gap-4"
                   >
-                    <h3 style={{ fontSize: "16px", fontWeight: 500 }}>Content Boundaries</h3>
-
-                    <div
-                      className="p-4 rounded-xl flex items-center justify-between transition-all"
-                      style={{
-                        background: isDark ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.025)",
-                        border: `1px solid ${T.cardBorder(isDark)}`,
-                      }}
-                    >
-                      <div className="flex flex-col gap-1.5 pr-4">
-                        <span style={{ fontSize: "13.5px", fontWeight: 500 }}>Adult or NSFW Roleplay</span>
-                        <span style={{ fontSize: "11px", color: T.muted(isDark), lineHeight: 1.4 }}>
-                          Enable or disable uncensored/explicit conversations. If enabled, the companion will naturally participate in mature themes.
-                        </span>
-                      </div>
-                      
-                      {/* Interactive Switch */}
-                      <button
-                        type="button"
-                        onClick={handleNsfwToggle}
-                        className="w-[46px] h-[24px] rounded-full p-0.5 transition-colors relative outline-none shrink-0"
-                        style={{
-                          background: nsfw ? T.accent : isDark ? "#3F3F46" : "#E4E4E7",
-                        }}
-                      >
-                        <motion.div
-                          layout
-                          className="w-[20px] h-[20px] rounded-full bg-white shadow-md"
-                          animate={{ x: nsfw ? 20 : 0 }}
-                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                        />
-                      </button>
-                    </div>
-
-                    <div
-                      className="p-4 rounded-xl flex items-start gap-3 mt-2"
-                      style={{
-                        background: nsfw ? "rgba(56,189,248,0.03)" : "rgba(255,255,255,0.01)",
-                        border: `1px solid ${nsfw ? T.accentBorder : T.cardBorder(isDark)}`,
-                      }}
-                    >
-                      {nsfw ? (
-                        <Sparkles size={16} className="shrink-0 mt-0.5" style={{ color: T.accent }} />
-                      ) : (
-                        <Shield size={16} className="shrink-0 mt-0.5" style={{ color: T.dim(isDark) }} />
-                      )}
-                      <div className="flex flex-col gap-1">
-                        <span style={{ fontSize: "12.5px", fontWeight: 500 }}>
-                          {nsfw ? "Unfiltered Expression" : "Content Guardrails Active"}
-                        </span>
-                        <span style={{ fontSize: "11px", color: T.muted(isDark), lineHeight: 1.4 }}>
-                          {nsfw
-                            ? "Companion system directives will permit mature themes and direct descriptive roleplay natively."
-                            : "Companion directives strictly enforce PG-13 boundaries. Explicit messages will be deflected politely."}
-                        </span>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                {step === 5 && nsfw && (
-                  <motion.div
-                    key="step5"
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    className="flex flex-col gap-4"
-                  >
                     <h3 style={{ fontSize: "16px", fontWeight: 500 }}>Physical Attributes (Optional)</h3>
                     <p style={{ fontSize: "12px", color: T.muted(isDark) }}>
-                      Configure details used by the LLM core when describing physical interaction and generating selfie prompts.
+                      Configure aesthetic physical details used when synthesizing prompts and selfies.
                     </p>
 
                     <div className="grid grid-cols-2 gap-4 mt-2">
-                      <div className="flex flex-col gap-1.5">
-                        <label style={{ fontSize: "11px", color: T.muted(isDark), textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                          Bust Size
-                        </label>
-                        <input
-                          type="text"
-                          value={bustSize}
-                          onChange={(e) => setBustSize(e.target.value)}
-                          className="w-full px-4 py-2.5 rounded-lg text-sm transition-all outline-none"
-                          style={{
-                            background: isDark ? "#121212" : "#F3F3F2",
-                            border: `1px solid ${T.cardBorder(isDark)}`,
-                            color: T.text(isDark),
-                          }}
-                          placeholder="e.g. flat, large, athletic"
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-1.5">
-                        <label style={{ fontSize: "11px", color: T.muted(isDark), textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                          Waist Size
-                        </label>
-                        <input
-                          type="text"
-                          value={waistSize}
-                          onChange={(e) => setWaistSize(e.target.value)}
-                          className="w-full px-4 py-2.5 rounded-lg text-sm transition-all outline-none"
-                          style={{
-                            background: isDark ? "#121212" : "#F3F3F2",
-                            border: `1px solid ${T.cardBorder(isDark)}`,
-                            color: T.text(isDark),
-                          }}
-                          placeholder="e.g. slim, tiny, natural"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="flex flex-col gap-1.5">
-                        <label style={{ fontSize: "11px", color: T.muted(isDark), textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                          Hips Size
-                        </label>
-                        <input
-                          type="text"
-                          value={hipsSize}
-                          onChange={(e) => setHipsSize(e.target.value)}
-                          className="w-full px-4 py-2.5 rounded-lg text-sm transition-all outline-none"
-                          style={{
-                            background: isDark ? "#121212" : "#F3F3F2",
-                            border: `1px solid ${T.cardBorder(isDark)}`,
-                            color: T.text(isDark),
-                          }}
-                          placeholder="e.g. wide, curvy, slim"
-                        />
-                      </div>
-
                       <div className="flex flex-col gap-1.5">
                         <label style={{ fontSize: "11px", color: T.muted(isDark), textTransform: "uppercase", letterSpacing: "0.05em" }}>
                           Skin Tone
@@ -702,9 +548,7 @@ export function PersonaSetup({
                           placeholder="e.g. fair, tanned, olive"
                         />
                       </div>
-                    </div>
 
-                    <div className="grid grid-cols-2 gap-4">
                       <div className="flex flex-col gap-1.5">
                         <label style={{ fontSize: "11px", color: T.muted(isDark), textTransform: "uppercase", letterSpacing: "0.05em" }}>
                           Hair Color / Style
@@ -722,7 +566,9 @@ export function PersonaSetup({
                           placeholder="e.g. long blonde, brunette"
                         />
                       </div>
+                    </div>
 
+                    <div className="grid grid-cols-2 gap-4">
                       <div className="flex flex-col gap-1.5">
                         <label style={{ fontSize: "11px", color: T.muted(isDark), textTransform: "uppercase", letterSpacing: "0.05em" }}>
                           Eye Color
@@ -782,8 +628,8 @@ export function PersonaSetup({
                   color: "#060606",
                 }}
               >
-                <span>{step === (nsfw ? 5 : 4) ? "Generate Companion" : "Continue"}</span>
-                {step === (nsfw ? 5 : 4) ? (
+                <span>{step === 4 ? "Generate Companion" : "Continue"}</span>
+                {step === 4 ? (
                   <Sparkles size={14} />
                 ) : (
                   <ArrowRight size={14} />
@@ -794,13 +640,6 @@ export function PersonaSetup({
         )}
       </div>
     </div>
-    {/* Age gate modal */}
-    <AgeGateModal
-      open={gateOpen}
-      isDark={isDark}
-      onConfirm={handleConfirm}
-      onDismiss={handleDismiss}
-    />
   </>
   );
 }
