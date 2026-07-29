@@ -181,7 +181,7 @@ export function SettingsPanel({ isDark, sessionUrl, onClose, conversations }: Se
       const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(conversations, null, 2));
       const a = document.createElement("a");
       a.setAttribute("href", dataUri);
-      a.setAttribute("download", `vices_history_${Date.now()}.json`);
+      a.setAttribute("download", `aethel_history_${Date.now()}.json`);
       a.click();
     } catch (e) {
       console.error("Export failed:", e);

@@ -35,7 +35,7 @@ export function useVoiceInput({ sessionUrl, onTranscript }: UseVoiceInputOptions
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDeaethel.getUserMedia({ audio: true });
       streamRef.current = stream;
       chunksRef.current = [];
 

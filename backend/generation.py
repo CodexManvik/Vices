@@ -26,55 +26,55 @@ console = Console()
 active_llama_process = None
 
 def get_tauri_models_dir() -> Path:
-    """Resolves the platform-specific local AppData path for Vices models."""
+    """Resolves the platform-specific local AppData path for Aethel models."""
     home = Path.home()
     
     # 1. Check Windows LOCALAPPDATA
     local_appdata = os.getenv("LOCALAPPDATA")
     if local_appdata:
         base_paths = [
-            Path(local_appdata) / "com.persona.ai.vices" / "models",
-            Path(local_appdata) / "Vices" / "models"
+            Path(local_appdata) / "com.aethel.app" / "models",
+            Path(local_appdata) / "Aethel" / "models"
         ]
         for p in base_paths:
             if p.exists():
                 return p
-        return Path(local_appdata) / "com.persona.ai.vices" / "models"
+        return Path(local_appdata) / "com.aethel.app" / "models"
         
     # 2. Check macOS Application Support
     if os.name == "posix":
         import platform
         if platform.system() == "Darwin":
             base_paths = [
-                home / "Library" / "Application Support" / "com.persona.ai.vices" / "models",
-                home / "Library" / "Application Support" / "Vices" / "models"
+                home / "Library" / "Application Support" / "com.aethel.app" / "models",
+                home / "Library" / "Application Support" / "Aethel" / "models"
             ]
             for p in base_paths:
                 if p.exists():
                     return p
-            return home / "Library" / "Application Support" / "com.persona.ai.vices" / "models"
+            return home / "Library" / "Application Support" / "com.aethel.app" / "models"
             
     # 3. Check Linux XDG_DATA_HOME
     xdg_data = os.getenv("XDG_DATA_HOME")
     if xdg_data:
         base_paths = [
-            Path(xdg_data) / "com.persona.ai.vices" / "models",
-            Path(xdg_data) / "Vices" / "models"
+            Path(xdg_data) / "com.aethel.app" / "models",
+            Path(xdg_data) / "Aethel" / "models"
         ]
         for p in base_paths:
             if p.exists():
                 return p
-        return Path(xdg_data) / "com.persona.ai.vices" / "models"
+        return Path(xdg_data) / "com.aethel.app" / "models"
         
     # Standard Linux fallback
     base_paths = [
-        home / ".local" / "share" / "com.persona.ai.vices" / "models",
-        home / ".local" / "share" / "Vices" / "models"
+        home / ".local" / "share" / "com.aethel.app" / "models",
+        home / ".local" / "share" / "Aethel" / "models"
     ]
     for p in base_paths:
         if p.exists():
             return p
-    return home / ".local" / "share" / "com.persona.ai.vices" / "models"
+    return home / ".local" / "share" / "com.aethel.app" / "models"
 
 def find_llama_server_binary() -> Optional[Path]:
     """Finds the llama-server binary in the environment."""
@@ -375,7 +375,7 @@ def ensure_local_server_running() -> bool:
         models_dir = get_tauri_models_dir()
         raise FileNotFoundError(
             f"No local GGUF models found in Tauri AppData directory: {models_dir}\n"
-            f"Please run the setup flow in the Vices app to download the models."
+            f"Please run the setup flow in the Aethel app to download the models."
         )
         
     return start_llama_server(main_model, vision_model)

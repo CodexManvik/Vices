@@ -1,30 +1,37 @@
-# VICES — Local-First AI Agent & Companion
+# Aethel — Local-First AI Agent
 
-VICES is a desktop AI agent that runs **100% on your own machine**. It chats,
-speaks, listens, sees images, executes tasks on your PC under strict
-permissions — and it *learns*: every completed task can become a reviewable
-markdown skill it uses to do better next time (**RSM — Reflective Skill
-Memory**).
+Aethel is a desktop AI agent that runs **100% on your own machine**. It chats,
+speaks, listens, and executes real tasks on your PC under strict permissions —
+and it *learns*: every completed task can become a reviewable markdown skill it
+uses to do better next time (**RSM — Reflective Skill Memory**).
+
+Nothing leaves your computer unless you explicitly switch on the optional cloud
+backend.
 
 ## Highlights
 
-- **Local everything** — llama.cpp LLM, Kokoro TTS, Whisper STT, Stable
-  Diffusion image gen, turbovec + LanceDB memory. No cloud required
-  (optional OpenAI-compatible cloud backend if you want it).
-- **RSM learning without fine-tuning** — the agent reflects on conversations
-  and tasks, writes behavioral rules + procedural skills as plain markdown
-  files you can read, edit, or git-version. You approve or reject everything;
-  outcome tracking automatically promotes what works and retires what fails.
-- **Real agent loop** — multi-step tool use (files, shell, web) with a
-  permission manifest, full audit log, and one-click rollback of file changes.
-- **Personas** — built-in companion, custom personas, or a style distilled
-  privately from your own chat exports (WhatsApp/Telegram/Discord/CSV).
-- **Measurable** — a built-in A/B benchmark runs the agent with and without
-  RSM knowledge and reports success rates (see `backend/benchmark_agent.py`).
+- **Local everything** — llama.cpp for chat, Kokoro for speech, Whisper for
+  transcription, turbovec + LanceDB for memory. No account, no API key, no
+  telemetry.
+- **Learning without fine-tuning (RSM)** — after each conversation and task the
+  agent reflects and writes behavioural *rules* and procedural *skills* as plain
+  markdown files. You approve or reject each one. Outcome tracking promotes what
+  works, retires what fails, and merges duplicates automatically.
+- **Real agent loop** — multi-step tool use (files, shell, web search) with a
+  permission manifest, a full audit log, and one-click rollback of any file
+  change the agent makes.
+- **Voice both ways** — speak to it (local Whisper), have it speak back (local
+  Kokoro). Models download themselves on first run.
+- **Ambient tone** — an optional two-dimensional tone model (mood × energy)
+  paints a soft colour around the composer so you can feel how the conversation
+  is going without reading a status badge.
+- **Measurable** — a built-in A/B benchmark runs the same task suite with and
+  without RSM knowledge and reports the difference (`backend/benchmark_agent.py`).
 
 ## Install
 
-Prerequisites: [Python 3.10+](https://python.org), [Node.js 20+](https://nodejs.org), [Rust](https://rustup.rs) (for Tauri).
+Prerequisites: [Python 3.10+](https://python.org), [Node.js 20+](https://nodejs.org),
+[Rust](https://rustup.rs) (for the Tauri desktop shell).
 
 ```bash
 # Windows (PowerShell) — add -Cuda for NVIDIA builds of llama.cpp
@@ -36,20 +43,23 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 bash scripts/install.sh
 ```
 
-The installer creates a Python venv, installs all dependencies, and downloads
+The installer creates a Python environment, installs dependencies, and downloads
 the llama.cpp server binary into `bin/llama/`.
 
-## Add models
+## Add a model
 
-Drop model files into the `models/` folder — that's it. See
-[models/README.md](models/README.md) for download links.
+Drop a chat model into `models/llm/` — that is the only required manual step.
+See [models/README.md](models/README.md) for recommendations and links.
 
 | Folder | What | Required? |
 |---|---|---|
-| `models/llm/` | Chat model (`.gguf`) | **Yes** — the only manual step |
-| `models/tts/` | Kokoro voice | Auto-downloads on first startup |
-| `models/stt/` | Whisper | Auto-downloads on first startup |
-| `models/image/` | SD checkpoint (`.safetensors`) | No — selfies disabled without it |
+| `models/llm/` | Chat model (`.gguf`) | **Yes** |
+| `models/tts/` | Kokoro voice | Downloads itself on first run |
+| `models/stt/` | Whisper | Downloads itself on first run |
+| `models/image/` | Image checkpoint | Optional, and off by default |
+
+You can also point at models anywhere on disk from **Settings → Models** instead
+of copying them into the project.
 
 ## Run
 
@@ -63,39 +73,52 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 bash scripts/start.sh
 ```
 
-This starts the backend (which auto-spawns the LLM engine — no manual
-llama.cpp wrangling) and opens the desktop app. First launch loads models,
-so give it a moment.
+This starts the backend — which spawns the LLM engine itself, no manual
+llama.cpp wrangling — and opens the desktop app. The first launch loads models
+and fetches the speech models in the background, so give it a moment.
 
-## Architecture
+Add `-BackendOnly` (or `--backend-only`) to run headless. API docs are at
+`http://localhost:8000/docs`.
+
+## How it works
 
 ```
-frontend_app/   Tauri v2 + React desktop app
-backend/        FastAPI server
-  agent_loop.py         multi-step tool loop (JSON tool calls)
+frontend_app/     Tauri v2 + React desktop app
+backend/          FastAPI server
+  agent_loop.py         multi-step tool loop (structured JSON tool calls)
   knowledge_store.py    RSM: rules + skills as markdown on disk
-  rule_engine.py        reflection pass -> behavioral rules
+  rule_engine.py        conversation reflection -> behavioural rules
   skill_engine.py       task reflection -> procedural skills
-  mcp_executor.py       fs/shell/web tools + permission manifest
+  mcp_executor.py       file/shell/web tools behind the permission manifest
   transaction_log.py    audit log + rollback
-  memory.py             episodic memory (turbovec 4-bit)
-  tts_engine.py         Kokoro (local) / Edge (fallback)
+  memory.py             episodic memory (turbovec, 4-bit quantised)
+  emotion_engine.py     optional conversation tone (mood x energy)
+  tts_engine.py         Kokoro (local) with Edge fallback
   stt_engine.py         faster-whisper voice input
-  image_generator.py    Stable Diffusion selfies
   benchmark_agent.py    RSM on/off A/B evaluation
-models/         your model files (see models/README.md)
-bin/llama/      llama.cpp server binary (installed by script)
-scripts/        install + start scripts
+models/           your model files
+scripts/          install + start scripts
 ```
 
-Learned knowledge lives in `~/.vices/knowledge/` as markdown files;
-permissions in `~/.vices/permissions.yaml`; the transaction log in
-`~/.vices/transactions.json`.
+Everything the agent learns lives in `~/.aethel/knowledge/` as markdown you can
+read, edit, delete, or put under version control. Permissions live in
+`~/.aethel/permissions.yaml`; the rollback log in `~/.aethel/transactions.json`.
+
+### RSM in one paragraph
+
+Fine-tuning a model to make it better at your tasks is slow, expensive, and
+opaque. Aethel instead writes what it learns into markdown and feeds the
+relevant pieces back through the prompt. A *rule* is a short behavioural
+instruction ("don't pad answers with pleasantries"); a *skill* is a procedure
+("to move a file: read it, write it to the destination, verify, then delete the
+source"). Each document carries outcome statistics, so retrieval is weighted by
+what has actually worked, and knowledge that keeps failing is retired
+automatically. Because it is all text, you can audit every single thing the
+system has "learned".
 
 ## Configuration
 
-Copy `.env.example` to `.env` (the installer does this) and adjust as needed.
-Key settings:
+Copy `.env.example` to `.env` (the installer does this) and edit as needed.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -104,18 +127,20 @@ Key settings:
 | `GENERATION_BACKEND` | `local` | `local` (llama.cpp) or `cloud` |
 | `TTS_ENGINE` | `kokoro` | `kokoro` (local) or `edge` (cloud) |
 | `STT_MODEL_SIZE` | `small` | whisper size: tiny/base/small/medium |
+| `EMOTION_ENGINE_ENABLED` | `true` | conversation tone tracking |
+| `IMAGE_GEN_ENABLED` | `false` | image generation (needs spare VRAM) |
 | `MAX_VRAM_ALLOCATION` | `4` | GB budget; ≤4 keeps aux models on CPU |
 
-## Evaluation (dissertation)
+Most of these are also editable in-app under **Settings**, where each control
+explains itself on hover.
+
+## Evaluation
 
 ```bash
-# A/B benchmark: agent with vs without RSM knowledge
+# A/B benchmark: the same tasks, with and without RSM knowledge
 .venv/Scripts/python backend/benchmark_agent.py --seed --runs 3
 ```
 
-Metrics endpoint: `GET /admin/eval/metrics` — all values are measured from
-stored data; missing data reports as `null`, never a fabricated default.
-
-## API
-
-Swagger docs at `http://localhost:8000/docs` when the backend is running.
+Metrics are also exposed at `GET /admin/eval/metrics`. Every value there is
+measured from stored data — where there isn't enough data to compute something,
+it reports `null` rather than inventing a number.

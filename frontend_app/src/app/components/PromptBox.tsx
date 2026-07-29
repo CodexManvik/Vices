@@ -156,7 +156,7 @@ export function PromptBox({
   onSend,
   disabled,
   sessionUrl,
-  placeholder = "Message VICES…",
+  placeholder = "Message AETHEL…",
   tone,
   toneEnabled = false,
 }: PromptBoxProps) {

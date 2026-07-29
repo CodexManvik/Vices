@@ -1,7 +1,7 @@
 /**
  * PersonaConfig.tsx
  *
- * Visual dashboard/modal to manage multiple VICES companion personas.
+ * Visual dashboard/modal to manage multiple AETHEL companion personas.
  * Users can switch active companions (max 2), edit, delete, or add new ones.
  */
 
@@ -230,7 +230,7 @@ export function PersonaConfig({
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          "X-Age-Verified": localStorage.getItem("vices_age_verified") || "false",
+          "X-Age-Verified": localStorage.getItem("aethel_age_verified") || "false",
         },
         body: JSON.stringify(payload),
       });

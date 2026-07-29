@@ -1,4 +1,4 @@
-# VICES — one-command setup (Windows)
+# AETHEL — one-command setup (Windows)
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\install.ps1 [-Cuda]
 #
 # Installs: Python venv + deps, frontend deps, llama.cpp server binary.
@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-Write-Host "`n=== VICES Installer ===" -ForegroundColor Magenta
+Write-Host "`n=== AETHEL Installer ===" -ForegroundColor Magenta
 Write-Host "Project root: $Root`n"
 
 # ---------- 1. Python ----------

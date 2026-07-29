@@ -40,7 +40,7 @@ export default function App() {
 
   // Flow states
   const [showOnboarding, setShowOnboarding] = useState(
-    () => localStorage.getItem("vices_onboarding_done") !== "true"
+    () => localStorage.getItem("aethel_onboarding_done") !== "true"
   );
   const [showPersonaBuilder, setShowPersonaBuilder] = useState(false);
   const [personas, setPersonas] = useState<any[]>([]);
@@ -110,7 +110,7 @@ export default function App() {
 
   // Conversations state with localStorage persistence
   const [conversations, setConversations] = useState<Conversation[]>(() => {
-    const saved = localStorage.getItem("vices_conversations");
+    const saved = localStorage.getItem("aethel_conversations");
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -122,19 +122,19 @@ export default function App() {
   });
 
   const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
-    const saved = localStorage.getItem("vices_active_conv_id");
+    const saved = localStorage.getItem("aethel_active_conv_id");
     return saved || "1";
   });
 
   useEffect(() => {
-    localStorage.setItem("vices_conversations", JSON.stringify(conversations));
+    localStorage.setItem("aethel_conversations", JSON.stringify(conversations));
   }, [conversations]);
 
   useEffect(() => {
     if (activeConversationId) {
-      localStorage.setItem("vices_active_conv_id", activeConversationId);
+      localStorage.setItem("aethel_active_conv_id", activeConversationId);
     } else {
-      localStorage.removeItem("vices_active_conv_id");
+      localStorage.removeItem("aethel_active_conv_id");
     }
   }, [activeConversationId]);
 

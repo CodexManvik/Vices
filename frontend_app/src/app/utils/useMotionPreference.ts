@@ -10,8 +10,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-const KEY = "vices_motion_override";      // "full" | "reduced" | absent
-const NOTICE_KEY = "vices_motion_notice_seen";
+const KEY = "aethel_motion_override";      // "full" | "reduced" | absent
+const NOTICE_KEY = "aethel_motion_notice_seen";
 
 export type MotionMode = "full" | "reduced";
 

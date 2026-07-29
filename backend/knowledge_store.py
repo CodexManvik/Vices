@@ -14,8 +14,8 @@ Two document types share one storage philosophy:
             retrieves before attempting a similar one (Voyager-style).
 
 Layout:
-  ~/.vices/knowledge/rules/<id>.md
-  ~/.vices/knowledge/skills/<id>.md
+  ~/.aethel/knowledge/rules/<id>.md
+  ~/.aethel/knowledge/skills/<id>.md
 
 Each file is YAML frontmatter + a markdown body. Frontmatter carries the
 lifecycle status (quarantined → approved → deprecated) and outcome statistics
@@ -44,7 +44,7 @@ import yaml
 # Paths & constants
 # ─────────────────────────────────────────────────────────────
 
-KNOWLEDGE_DIR = Path(os.getenv("RSM_KNOWLEDGE_DIR", str(Path.home() / ".vices" / "knowledge")))
+KNOWLEDGE_DIR = Path(os.getenv("RSM_KNOWLEDGE_DIR", str(Path.home() / ".aethel" / "knowledge")))
 RULES_DIR = KNOWLEDGE_DIR / "rules"
 SKILLS_DIR = KNOWLEDGE_DIR / "skills"
 

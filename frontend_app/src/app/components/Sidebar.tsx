@@ -116,7 +116,7 @@ export function Sidebar({
           <Sparkles size={16} strokeWidth={2.2} />
         </div>
         <div className="leading-none">
-          <div className="text-[15px] font-bold tracking-[0.14em]">VICES</div>
+          <div className="text-[15px] font-bold tracking-[0.14em]">AETHEL</div>
           <div className="text-[10px] mt-1" style={{ color: "var(--v-text-faint)" }}>
             Local AI Agent
           </div>

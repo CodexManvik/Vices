@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VICES — one-command setup (Linux / macOS)
+# AETHEL — one-command setup (Linux / macOS)
 # Usage:  bash scripts/install.sh [--cuda]
 #
 # Installs: Python venv + deps, frontend deps, llama.cpp server binary.
@@ -12,7 +12,7 @@ CUDA=0
 [[ "${1:-}" == "--cuda" ]] && CUDA=1
 
 echo ""
-echo "=== VICES Installer ==="
+echo "=== AETHEL Installer ==="
 echo "Project root: $ROOT"
 echo ""
 

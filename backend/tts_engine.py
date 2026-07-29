@@ -1,7 +1,7 @@
 """
 tts_engine.py
 
-Pluggable text-to-speech for VICES.
+Pluggable text-to-speech for AETHEL.
 
 Engines:
   kokoro : Kokoro-82M via kokoro-onnx — fully local, CPU-friendly, near-SOTA

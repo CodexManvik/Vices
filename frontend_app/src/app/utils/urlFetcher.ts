@@ -75,7 +75,7 @@ export async function fetchUrlContent(url: string): Promise<string | null> {
         Accept: "text/html,application/xhtml+xml;q=0.9,text/plain;q=0.8",
         // Mimic a browser to avoid bot-blocking on simple pages
         "User-Agent":
-          "Mozilla/5.0 (compatible; VicesBot/1.0; +https://vices.ai)",
+          "Mozilla/5.0 (compatible; AethelBot/1.0; +https://aethel.ai)",
       },
     });
 

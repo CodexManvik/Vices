@@ -1,7 +1,7 @@
 """
 eval_harness.py
 
-Quantitative evaluation metrics for the VICES / RSM system.
+Quantitative evaluation metrics for the AETHEL / RSM system.
 
 Honesty contract (dissertation-critical): every number reported here is
 computed from stored data. Metrics with insufficient underlying data are

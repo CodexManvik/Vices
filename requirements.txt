@@ -1,4 +1,4 @@
-# VICES backend — single source of truth for Python dependencies.
+# AETHEL backend — single source of truth for Python dependencies.
 # Install:  pip install -r requirements.txt   (the install script does this)
 
 # --- API server ---

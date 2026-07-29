@@ -79,7 +79,7 @@ export function EvaluationDashboard({ isDark, sessionUrl, adminPassword }: Evalu
       const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
       const linkElement = document.createElement("a");
       linkElement.setAttribute("href", dataUri);
-      linkElement.setAttribute("download", `vices_dissertation_eval_${Date.now()}.json`);
+      linkElement.setAttribute("download", `aethel_dissertation_eval_${Date.now()}.json`);
       linkElement.click();
     } catch (e) {
       console.error("Export eval summary error:", e);

@@ -34,7 +34,7 @@ class ErrorBoundary extends Component<Props, State> {
             <div className="w-12 h-12 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-center mx-auto text-xl font-bold">
               !
             </div>
-            <h1 className="text-lg font-bold">Vices UI Application Error</h1>
+            <h1 className="text-lg font-bold">Aethel UI Application Error</h1>
             <p className="text-xs text-zinc-400 leading-relaxed bg-black/40 p-3 rounded-lg border border-white/5 font-mono text-left overflow-x-auto max-h-32">
               {this.state.error?.toString() || "Unknown rendering exception"}
             </p>

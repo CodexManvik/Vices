@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_KEY = "vices_theme";
+const STORAGE_KEY = "aethel_theme";
 
 function getInitialTheme(): "dark" | "light" {
   const saved = localStorage.getItem(STORAGE_KEY);

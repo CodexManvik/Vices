@@ -374,7 +374,7 @@ export function ChatMessage({
                 textTransform: "uppercase",
               }}
             >
-              {isUser ? "You" : "Vices Agent"}
+              {isUser ? "You" : "Aethel Agent"}
             </span>
             <span style={{ fontSize: "10px", color: isDark ? "#64748B" : "#94A3B8" }}>
               {message.time}
@@ -429,7 +429,7 @@ export function ChatMessage({
                   style={{ background: "var(--v-surface-2)" }}
                 >
                   {/* animated shimmer sweep */}
-                  <div className="vices-shimmer absolute inset-0" />
+                  <div className="aethel-shimmer absolute inset-0" />
                   {/* pulsing camera glyph */}
                   <div
                     className="relative z-10 w-12 h-12 rounded-2xl flex items-center justify-center"

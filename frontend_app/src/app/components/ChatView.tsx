@@ -74,7 +74,7 @@ export function ChatView({
   // Codex Terminal Drawer State
   const [showTerminalDrawer, setShowTerminalDrawer] = useState(false);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([
-    "[SYSTEM] Vices Agent Kernel initialised.",
+    "[SYSTEM] Aethel Agent Kernel initialised.",
     "[MEMORY] Turbovec vector index & LanceDB graph loaded.",
     "[COGNITIVE CORE] ONNX emotion engine active on CPU.",
   ]);
@@ -484,7 +484,7 @@ export function ChatView({
             <div className="px-4 py-2 bg-slate-950 flex items-center justify-between border-b border-slate-800 text-[11px] text-slate-400 select-none">
               <div className="flex items-center gap-2">
                 <Terminal size={12} className="text-sky-400" />
-                <span>VICES KERNEL LOGS</span>
+                <span>AETHEL KERNEL LOGS</span>
               </div>
               <button
                 onClick={() => setShowTerminalDrawer(false)}

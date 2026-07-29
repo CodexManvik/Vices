@@ -147,7 +147,7 @@ export function Gatekeeper({ onAuthorized, isDark }: GatekeeperProps) {
             }}
           >
             {connState === "connecting" &&
-              "Reaching the local VICES AI server."}
+              "Reaching the local AETHEL AI server."}
             {connState === "connected" &&
               "Local engine is running. Launching…"}
             {connState === "failed" &&

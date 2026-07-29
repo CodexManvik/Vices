@@ -132,7 +132,7 @@ export function WindowChrome({ isDark }: WindowChromeProps) {
       >
         <div className="flex items-center gap-2 pointer-events-none">
           <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
-          <span className="tracking-widest text-[10px] font-mono uppercase opacity-40 font-bold">Vices Frame v2</span>
+          <span className="tracking-widest text-[10px] font-mono uppercase opacity-40 font-bold">Aethel Frame v2</span>
         </div>
       </div>
     </div>

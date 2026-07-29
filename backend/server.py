@@ -95,7 +95,7 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def _lifespan(app):
-    # Startup: kick off background services. Names resolve at call time, so the
+    # Startup: kick off background seraethel. Names resolve at call time, so the
     # handlers defined later in the module are available here.
     asyncio.create_task(chronos_loop())
     asyncio.create_task(_warm_start_models())
@@ -1862,7 +1862,7 @@ async def reject_skill_endpoint(data: SkillActionInput, password: str = Header(N
 @app.post("/admin/knowledge/reindex")
 async def reindex_knowledge_endpoint(password: str = Header(None)):
     """Rebuilds the in-memory vector index from the markdown files on disk.
-    Use after hand-editing files in ~/.vices/knowledge/."""
+    Use after hand-editing files in ~/.aethel/knowledge/."""
     if not password or not secrets.compare_digest(password, ADMIN_PASSWORD):
         raise HTTPException(status_code=401, detail="Unauthorized")
     ks.rebuild_index()
@@ -2053,5 +2053,5 @@ async def get_evaluation_metrics_endpoint(password: str = Header(None)):
 # ==========================================
 
 if __name__ == "__main__":
-    console.print("[bold green]VICES AI — Local Personal Agent Active.[/bold green]")
+    console.print("[bold green]AETHEL AI — Local Personal Agent Active.[/bold green]")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

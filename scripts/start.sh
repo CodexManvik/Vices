@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VICES — start everything (Linux / macOS)
+# AETHEL — start everything (Linux / macOS)
 # Usage:  bash scripts/start.sh [--backend-only]
 #
 # Launches the backend API (which auto-spawns the local LLM engine) and the
@@ -19,7 +19,7 @@ if ! ls models/llm/*.gguf >/dev/null 2>&1; then
   echo "         See models/README.md for recommendations." >&2
 fi
 
-echo "Starting VICES backend (http://localhost:8000)..."
+echo "Starting AETHEL backend (http://localhost:8000)..."
 (cd backend && ../.venv/bin/python server.py) &
 BACKEND_PID=$!
 

@@ -1,4 +1,4 @@
-# VICES — start everything (Windows)
+# AETHEL — start everything (Windows)
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\start.ps1 [-BackendOnly]
 #
 # Launches the backend API (which auto-spawns the local LLM engine) and the
@@ -24,7 +24,7 @@ if (-not $gguf) {
     Write-Host "         See models\README.md for recommendations." -ForegroundColor Yellow
 }
 
-Write-Host "Starting VICES backend (http://localhost:8000)..." -ForegroundColor Cyan
+Write-Host "Starting AETHEL backend (http://localhost:8000)..." -ForegroundColor Cyan
 $backend = Start-Process -FilePath "$Root\.venv\Scripts\python.exe" `
     -ArgumentList "$Root\backend\server.py" `
     -WorkingDirectory "$Root\backend" `

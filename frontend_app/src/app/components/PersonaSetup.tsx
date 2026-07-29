@@ -1,7 +1,7 @@
 /**
  * PersonaSetup.tsx
  *
- * Interactive step-by-step wizard for configuring a new VICES companion.
+ * Interactive step-by-step wizard for configuring a new AETHEL companion.
  * Integrates with the backend's /personas/setup endpoint to run LLM system prompt synthesis.
  */
 
@@ -173,7 +173,7 @@ export function PersonaSetup({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Age-Verified": localStorage.getItem("vices_age_verified") || "false",
+          "X-Age-Verified": localStorage.getItem("aethel_age_verified") || "false",
         },
         body: JSON.stringify(payload),
       });
@@ -183,7 +183,7 @@ export function PersonaSetup({
       if (res.ok) {
         setGenProgress(100);
         setGenStatusText("Persona initialized successfully!");
-        localStorage.setItem("vices_persona_setup_done", "1");
+        localStorage.setItem("aethel_persona_setup_done", "1");
         setTimeout(() => {
           setIsGenerating(false);
           onComplete();
@@ -248,7 +248,7 @@ export function PersonaSetup({
                   letterSpacing: "0.05em",
                 }}
               >
-                Synthesizing VICES Companion Core
+                Synthesizing AETHEL Companion Core
               </h2>
               <p style={{ fontSize: "13px", color: T.muted(isDark) }}>
                 {genStatusText}
@@ -297,7 +297,7 @@ export function PersonaSetup({
                     letterSpacing: "0.06em",
                   }}
                 >
-                  VICES Companion Customizer
+                  AETHEL Companion Customizer
                 </span>
               </div>
               <span style={{ fontSize: "11px", color: T.muted(isDark), letterSpacing: "0.1em" }}>
@@ -333,7 +333,7 @@ export function PersonaSetup({
                   >
                     <h3 style={{ fontSize: "16px", fontWeight: 500 }}>Create Your Perfect AI Companion</h3>
                     <p style={{ fontSize: "13.5px", color: T.muted(isDark), lineHeight: 1.6 }}>
-                      Welcome to the VICES Core customizer. Our downloaded local model will dynamically design your companion's system prompts.
+                      Welcome to the AETHEL Core customizer. Our downloaded local model will dynamically design your companion's system prompts.
                     </p>
                     <p style={{ fontSize: "13.5px", color: T.muted(isDark), lineHeight: 1.6 }}>
                       In the following steps, you will configure their name, relationship dynamics, custom backstory, and safety options.
@@ -349,7 +349,7 @@ export function PersonaSetup({
                       <div className="flex flex-col gap-1">
                         <span style={{ fontSize: "12px", fontWeight: 500 }}>Uncensored Privacy</span>
                         <span style={{ fontSize: "11px", color: T.muted(isDark), lineHeight: 1.4 }}>
-                          Because VICES runs completely on your local hardware, your companionship configuration and prompts are strictly private and offline.
+                          Because AETHEL runs completely on your local hardware, your companionship configuration and prompts are strictly private and offline.
                         </span>
                       </div>
                     </div>

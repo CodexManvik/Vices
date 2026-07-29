@@ -2,7 +2,7 @@
 permission_manifest.py
 
 Manages and enforces security permission constraints for agentic tool execution (MCP).
-Permission manifests are stored at ~/.vices/permissions.yaml.
+Permission manifests are stored at ~/.aethel/permissions.yaml.
 """
 
 import os
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from pydantic import BaseModel, Field
 
-PERMISSIONS_PATH = Path.home() / ".vices" / "permissions.yaml"
+PERMISSIONS_PATH = Path.home() / ".aethel" / "permissions.yaml"
 
 DEFAULT_PERMISSIONS = {
     "filesystem": {
@@ -22,7 +22,7 @@ DEFAULT_PERMISSIONS = {
         ],
         "allowed_write_paths": [
             str(Path.home() / "Documents" / "ai-tasks"),
-            str(Path.home() / ".vices" / "scratch"),
+            str(Path.home() / ".aethel" / "scratch"),
             "C:/Project/persona-ai/scratch",
         ],
         "forbidden_paths": [

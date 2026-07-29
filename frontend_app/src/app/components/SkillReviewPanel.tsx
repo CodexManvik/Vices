@@ -4,7 +4,7 @@
  * Human-in-the-Loop review interface for RSM learned skills.
  * Skills are procedural playbooks the agent writes after completing
  * tool-using tasks. They live as markdown files on disk
- * (~/.vices/knowledge/skills/) and flow quarantined -> approved -> deprecated,
+ * (~/.aethel/knowledge/skills/) and flow quarantined -> approved -> deprecated,
  * with outcome statistics (retrievals / successes / failures) driving
  * reward-weighted retrieval and auto-deprecation.
  */

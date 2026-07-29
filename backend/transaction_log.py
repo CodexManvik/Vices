@@ -3,7 +3,7 @@ transaction_log.py
 
 Audit log & rollback engine for agentic tool operations.
 Records every file write, file deletion, and shell execution with unified diffs
-and base64/raw rollback payloads stored at ~/.vices/transactions.json.
+and base64/raw rollback payloads stored at ~/.aethel/transactions.json.
 """
 
 import os
@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
-TRANSACTIONS_PATH = Path.home() / ".vices" / "transactions.json"
+TRANSACTIONS_PATH = Path.home() / ".aethel" / "transactions.json"
 
 
 class Transaction(BaseModel):

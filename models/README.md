@@ -1,6 +1,6 @@
 # Models Folder
 
-Drop your model files here and VICES picks them up automatically at startup —
+Drop your model files here and Aethel picks them up automatically at startup —
 no configuration needed. Everything runs 100% locally.
 
 ```

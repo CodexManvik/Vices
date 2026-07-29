@@ -126,7 +126,7 @@
 }
 
 /* ============================================================
-   VICES design tokens — the single source of truth for the app
+   AETHEL design tokens — the single source of truth for the app
    shell UI. Components read these via var(--v-*) so light/dark
    stay consistent without per-component isDark ternaries.
    Theme is switched by setting data-theme="dark|light" on <html>.
@@ -348,18 +348,18 @@
 }
 
 /* Shimmer sweep for the image-generating placeholder card */
-@keyframes vices-shimmer-sweep {
+@keyframes aethel-shimmer-sweep {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
-.vices-shimmer {
+.aethel-shimmer {
   background: linear-gradient(
     100deg,
     transparent 20%,
     var(--v-accent-soft) 50%,
     transparent 80%
   );
-  animation: vices-shimmer-sweep 1.6s ease-in-out infinite;
+  animation: aethel-shimmer-sweep 1.6s ease-in-out infinite;
 }
 
 /* Custom scrollbar that follows the theme */

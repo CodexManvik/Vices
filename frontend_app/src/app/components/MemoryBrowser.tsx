@@ -38,7 +38,7 @@ const T = {
 
 export function MemoryBrowser({ isDark, sessionUrl, onClose }: MemoryBrowserProps) {
   const [authenticated, setAuthenticated] = useState(false);
-  const [password, setPassword] = useState(localStorage.getItem("vices_admin_password") || "");
+  const [password, setPassword] = useState(localStorage.getItem("aethel_admin_password") || "");
   const [showPassword, setShowPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [authenticating, setAuthenticating] = useState(false);
@@ -77,7 +77,7 @@ export function MemoryBrowser({ isDark, sessionUrl, onClose }: MemoryBrowserProp
       setGraphData(data.graph || { nodes: [], links: [] });
       setVectors(data.vectors || []);
       setAuthenticated(true);
-      localStorage.setItem("vices_admin_password", adminPassword);
+      localStorage.setItem("aethel_admin_password", adminPassword);
     } catch (e: any) {
       setPasswordError(e?.message || "Failed to load diagnostic database.");
     } finally {

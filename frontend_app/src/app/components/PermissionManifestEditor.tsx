@@ -188,7 +188,7 @@ export function PermissionManifestEditor({ isDark, sessionUrl, adminPassword }: 
                   border: `1px solid ${isDark ? "rgba(168,85,247,0.25)" : "rgba(147,51,234,0.25)"}`,
                 }}
               >
-                ~/.vices/permissions.yaml
+                ~/.aethel/permissions.yaml
               </span>
             </div>
             <p className="text-xs mt-1" style={{ color: textMuted }}>

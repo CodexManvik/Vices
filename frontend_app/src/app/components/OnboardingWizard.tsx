@@ -1,7 +1,7 @@
 /**
  * OnboardingWizard.tsx
  *
- * First-time setup wizard for VICES AI.
+ * First-time setup wizard for AETHEL AI.
  * 1. Welcomes the user & asks for preferred name.
  * 2. Explains local system permissions (files, terminal commands, web search).
  * 3. Asks if user wants uncensored/adult mode (requires 18+ age verification).
@@ -49,15 +49,15 @@ export function OnboardingWizard({
 
   // Step 1 State: User Name
   const [userName, setUserName] = useState(
-    localStorage.getItem("vices_user_name") || ""
+    localStorage.getItem("aethel_user_name") || ""
   );
 
   // Step 2 State: Uncensored Mode & Age Gate
   const [enableAdultMode, setEnableAdultMode] = useState(
-    localStorage.getItem("vices_age_verified") === "true"
+    localStorage.getItem("aethel_age_verified") === "true"
   );
   const [ageConfirmed, setAgeConfirmed] = useState(
-    localStorage.getItem("vices_age_verified") === "true"
+    localStorage.getItem("aethel_age_verified") === "true"
   );
 
   // Step 3 State: Companion choice (Rosia default for everyone)
@@ -73,7 +73,7 @@ export function OnboardingWizard({
 
   const handleStep1Next = () => {
     const trimmed = userName.trim() || "User";
-    localStorage.setItem("vices_user_name", trimmed);
+    localStorage.setItem("aethel_user_name", trimmed);
     setStep(2);
   };
 
@@ -83,9 +83,9 @@ export function OnboardingWizard({
     }
 
     if (enableAdultMode && ageConfirmed) {
-      localStorage.setItem("vices_age_verified", "true");
+      localStorage.setItem("aethel_age_verified", "true");
     } else {
-      localStorage.setItem("vices_age_verified", "false");
+      localStorage.setItem("aethel_age_verified", "false");
     }
 
     setStep(3);
@@ -93,7 +93,7 @@ export function OnboardingWizard({
 
   const handleFinalize = async (choiceId: string) => {
     if (choiceId === "custom_build") {
-      localStorage.setItem("vices_onboarding_done", "true");
+      localStorage.setItem("aethel_onboarding_done", "true");
       onTriggerCustomBuild();
       return;
     }
@@ -118,7 +118,7 @@ export function OnboardingWizard({
     setActivationMessage("Warming up AI engine context...");
     await new Promise((resolve) => setTimeout(resolve, 400));
 
-    localStorage.setItem("vices_onboarding_done", "true");
+    localStorage.setItem("aethel_onboarding_done", "true");
     setIsActivating(false);
     onComplete(choiceId);
   };
@@ -172,7 +172,7 @@ export function OnboardingWizard({
                 letterSpacing: "0.04em",
               }}
             >
-              Welcome to VICES AI
+              Welcome to AETHEL AI
             </h1>
           </div>
           <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: muted }}>
@@ -209,7 +209,7 @@ export function OnboardingWizard({
                     First, let's get acquainted.
                   </h2>
                   <p style={{ fontSize: "13px", color: muted, lineHeight: 1.5 }}>
-                    VICES runs decentralized on your local machine. Tell us what your AI assistant should call you.
+                    AETHEL runs decentralized on your local machine. Tell us what your AI assistant should call you.
                   </p>
                 </div>
 
@@ -290,7 +290,7 @@ export function OnboardingWizard({
                     Content Safety & Uncensored Dynamic
                   </h2>
                   <p style={{ fontSize: "13px", color: muted, lineHeight: 1.5 }}>
-                    VICES supports both filtered standard mode and unrestricted uncensored dynamic models.
+                    AETHEL supports both filtered standard mode and unrestricted uncensored dynamic models.
                   </p>
                 </div>
 
@@ -408,7 +408,7 @@ export function OnboardingWizard({
                     Choose Your Starting Companion
                   </h2>
                   <p style={{ fontSize: "13px", color: muted, lineHeight: 1.5 }}>
-                    Select how VICES will converse with you. You can change or distill companion personas anytime later.
+                    Select how AETHEL will converse with you. You can change or distill companion personas anytime later.
                   </p>
                 </div>
 
@@ -523,7 +523,7 @@ export function OnboardingWizard({
                     className="flex-1 py-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md"
                     style={{ background: accent, color: "#060606" }}
                   >
-                    <span>Launch VICES</span>
+                    <span>Launch AETHEL</span>
                     <Sparkles size={14} />
                   </button>
                 </div>

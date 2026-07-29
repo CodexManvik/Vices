@@ -23,7 +23,7 @@ import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ShieldAlert, X } from "lucide-react";
 
-const AGE_VERIFIED_KEY = "vices_age_verified";
+const AGE_VERIFIED_KEY = "aethel_age_verified";
 
 // ─────────────────────────────────────────────────────────────
 // Hook

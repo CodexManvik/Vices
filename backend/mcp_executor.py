@@ -1,7 +1,7 @@
 """
 mcp_executor.py
 
-MCP Tool Execution Engine for VICES AI Agent.
+MCP Tool Execution Engine for AETHEL AI Agent.
 Implements filesystem_mcp, shell_mcp, and browser_mcp tools with mandatory permission
 manifest validation and transaction logging/rollback support.
 """
@@ -210,7 +210,7 @@ async def execute_fetch_url(url: str) -> Tuple[bool, str]:
     try:
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "VICES-AI-Agent/1.0 (Local-Privacy-Agent)"},
+            headers={"User-Agent": "AETHEL-AI-Agent/1.0 (Local-Privacy-Agent)"},
         )
 
         def _fetch():

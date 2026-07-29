@@ -4,7 +4,7 @@
  * Full-screen hardware-aware setup flow shown once on first launch.
  * Detects GPU capability, scans for existing models, and presents a
  * choice between downloading the local Gemma-4 model or connecting to
- * the central VICES server.
+ * the central AETHEL server.
  *
  * Phase state machine:
  *   detecting → (GPU check + model scan)
@@ -246,7 +246,7 @@ function ChooseScreen({
             textAlign: "center",
           }}
         >
-          VICES Intelligence Core
+          AETHEL Intelligence Core
         </h1>
 
         <p
@@ -259,7 +259,7 @@ function ChooseScreen({
             lineHeight: 1.6,
           }}
         >
-          We detected a capable GPU on your system. You can run VICES locally
+          We detected a capable GPU on your system. You can run AETHEL locally
           for complete privacy, or connect to the central server.
         </p>
 
@@ -535,7 +535,7 @@ function ChooseScreen({
                 lineHeight: 1.55,
               }}
             >
-              Connect to the central VICES GPU server. Instant access, no
+              Connect to the central AETHEL GPU server. Instant access, no
               download required.
             </span>
           </div>
@@ -692,7 +692,7 @@ function ModelFoundScreen({
             lineHeight: 1.6,
           }}
         >
-          VICES found {foundModels.length} model file
+          AETHEL found {foundModels.length} model file
           {foundModels.length !== 1 ? "s" : ""} in your local model directory.
         </p>
       </div>
@@ -1074,7 +1074,7 @@ function CompleteScreen({
             color: T.muted(dark),
           }}
         >
-          Initialising VICES...
+          Initialising AETHEL...
         </p>
       </div>
 
@@ -1129,8 +1129,8 @@ export function LocalSetup({ isDark: dark, onComplete }: LocalSetupProps) {
 
       if (!gpu.hasCapableGpu) {
         // No capable GPU — skip setup entirely, go straight to server flow
-        localStorage.setItem("vices_setup_done", "1");
-        localStorage.setItem("vices_mode", "server");
+        localStorage.setItem("aethel_setup_done", "1");
+        localStorage.setItem("aethel_mode", "server");
         onComplete("server");
         return;
       }
@@ -1184,8 +1184,8 @@ export function LocalSetup({ isDark: dark, onComplete }: LocalSetupProps) {
 
       if (!controller.signal.aborted) {
         setPhase("complete");
-        localStorage.setItem("vices_setup_done", "1");
-        localStorage.setItem("vices_mode", "local");
+        localStorage.setItem("aethel_setup_done", "1");
+        localStorage.setItem("aethel_mode", "local");
       }
     } catch (err: unknown) {
       const isDomAbort =
@@ -1208,14 +1208,14 @@ export function LocalSetup({ isDark: dark, onComplete }: LocalSetupProps) {
   };
 
   const handleServerChoice = () => {
-    localStorage.setItem("vices_setup_done", "1");
-    localStorage.setItem("vices_mode", "server");
+    localStorage.setItem("aethel_setup_done", "1");
+    localStorage.setItem("aethel_mode", "server");
     onComplete("server");
   };
 
   const handleLocalModelFound = () => {
-    localStorage.setItem("vices_setup_done", "1");
-    localStorage.setItem("vices_mode", "local");
+    localStorage.setItem("aethel_setup_done", "1");
+    localStorage.setItem("aethel_mode", "local");
     onComplete("local");
   };
 

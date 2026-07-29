@@ -3,7 +3,7 @@
 Compatibility layer over knowledge_store (RSM Phase 2).
 
 Behavioral rules used to live in a LanceDB table; they are now markdown files
-under ~/.vices/knowledge/rules/ managed by knowledge_store.py. This module
+under ~/.aethel/knowledge/rules/ managed by knowledge_store.py. This module
 keeps the original rule_store API surface so rule_engine.py, prompt_builder.py
 and the server admin endpoints work unchanged.
 
